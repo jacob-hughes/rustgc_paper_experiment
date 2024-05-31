@@ -1,0 +1,34 @@
+From 954faeb0c70e0fa8f719fc48cbb5db564b5bb7a6 Mon Sep 17 00:00:00 2001
+From: Jake Hughes <jake@bencher16.soft-dev.org>
+Date: Thu, 6 Jun 2024 02:07:58 +0100
+Subject: [PATCH] iters
+
+---
+ rebench.conf | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/rebench.conf b/rebench.conf
+index ccbf137..3ec53c7 100644
+--- a/rebench.conf
++++ b/rebench.conf
+@@ -19,7 +19,7 @@ benchmark_suites:
+     macro:
+         gauge_adapter: RebenchLog
+         command: &MACRO_CMD "-c core-lib/Smalltalk core-lib/Examples/Benchmarks core-lib/Examples/Benchmarks/Richards core-lib/Examples/Benchmarks/DeltaBlue core-lib/Examples/Benchmarks/NBody core-lib/Examples/Benchmarks/Json core-lib/Examples/Benchmarks/GraphSearch -- BenchmarkHarness %(benchmark)s %(iterations)s "
+-        iterations: 10
++        iterations: 1
+         benchmarks:
+             - Richards:     {extra_args: 1}
+             - DeltaBlue:    {extra_args: 1000}
+@@ -31,7 +31,7 @@ benchmark_suites:
+     micro:
+         gauge_adapter: RebenchLog
+         command: "-c core-lib/Smalltalk core-lib/Examples/Benchmarks core-lib/Examples/Benchmarks/LanguageFeatures -- BenchmarkHarness %(benchmark)s %(iterations)s "
+-        iterations: 10
++        iterations: 1
+         benchmarks:
+             - Fannkuch:     {extra_args: 7}
+             - Fibonacci:    {extra_args: "20"}
+-- 
+2.39.2
+

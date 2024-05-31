@@ -106,4 +106,5 @@ def process_graph(name, p, all, opt, none):
     plt.savefig(name, format="svg", bbox_inches="tight")
 
 
-process_graph("som_rs_barriers.svg", "raw_data/som-rs-barriers.data", 'all_barriers', 'opt_barriers', 'no_barriers')
+# process_graph("som_rs_barriers.svg", "raw_data/som-rs-barriers.data", 'all_barriers', 'opt_barriers', 'no_barriers')
+process_graph("yksom_barriers.svg", "raw_data/yksom_barriers.data", 'all_barriers', 'opt_barriers', 'no_barriers')

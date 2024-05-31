@@ -24,7 +24,7 @@ def confidence_interval(l):
     Z = 2.576  # 99% interval
     return Z * (stdev(l) / math.sqrt(len(l)))
 
-def process_graph(name, p, baseline, comparison):
+def process_graph(name, p, rc, gc, rc_boehm):
     results = {}
     with open(p) as f:
         for l in f.readlines():
@@ -50,36 +50,45 @@ def process_graph(name, p, baseline, comparison):
             results[bm][cfg].append(float(s[2]))
 
     benchmarks = []
-    elision_means = []
-    naive_means = []
-    elision_cis = []
-    naive_cis = []
+    rc_means = []
+    gc_means = []
+    rc_boehm_means = []
+
+    rc_cis = []
+    gc_cis = []
+    rc_boehm_cis = []
 
     for bm, runs in dict(sorted(results.items())).items():
-        if baseline not in runs:
-            print("No results for ", bm)
-            continue
+        # if rc not in runs:
+        #     print("No results for ", bm)
+        #     continue
         benchmarks.append(bm)
-        naive_runs = []
-        elision_runs = []
-        for bl, cmp in zip(runs[baseline], runs[comparison]):
-            naive_runs.append(bl)
-            elision_runs.append(cmp)
+        rc_runs = []
+        gc_runs = []
+        rc_boehm_runs = []
+        for r, g, b in zip(runs[rc], runs[gc], runs[rc_boehm]):
+            rc_runs.append(r)
+            gc_runs.append(g)
+            rc_boehm_runs.append(b)
 
-        naive_means.append(mean(naive_runs))
-        naive_cis.append(confidence_interval(naive_runs))
-        elision_means.append(mean(elision_runs))
-        elision_cis.append(confidence_interval(elision_runs))
+        print(rc_runs)
+
+        rc_means.append(mean(rc_runs))
+        rc_cis.append(confidence_interval(rc_runs))
+        gc_means.append(mean(gc_runs))
+        gc_cis.append(confidence_interval(gc_runs))
+        rc_boehm_means.append(mean(rc_boehm_runs))
+        rc_cis.append(confidence_interval(rc_boehm_runs))
 
     sns.set(style="whitegrid")
     plt.rc('text', usetex=True)
     plt.rc('font', family='sans-serif')
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    df = pd.DataFrame(zip(naive_means, elision_means), index=benchmarks)
-    errs = pd.DataFrame(zip(naive_cis, elision_cis), index=benchmarks)
+    df = pd.DataFrame(zip(rc_means, rc_boehm_means, gc_means), index=benchmarks)
+    errs = pd.DataFrame(zip(rc_cis, rc_boehm_cis, gc_cis), index=benchmarks)
     plot = df.plot(kind='bar', width=0.8, ax=ax, yerr=errs)
     plot.margins(x=0.01)
-    ax.legend(['RC', 'GC'])
+    ax.legend(['RC', 'RC(boehm)' 'GC'])
 
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -99,4 +108,4 @@ def process_graph(name, p, baseline, comparison):
     plt.tight_layout()
     plt.savefig(name, format="svg", bbox_inches="tight")
 
-process_graph("som_rs_perf.svg", "raw_data/som-rs-perf.data", 'som-rs-rc', 'som-rs-gc')
+process_graph("som_rs_perf.svg", "raw_data/som-rs-perf.data", 'som-rs-rc', 'som-rs-gc', 'som-rs-rc-boehm')

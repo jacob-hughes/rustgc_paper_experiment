@@ -1,0 +1,25 @@
+From f73d16c299843027004c46cc3d9d88affe7abc91 Mon Sep 17 00:00:00 2001
+From: Jake Hughes <jake@bencher16.soft-dev.org>
+Date: Thu, 13 Jun 2024 16:27:00 +0100
+Subject: [PATCH] Opt barriers
+
+---
+ library/std/src/gc.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/library/std/src/gc.rs b/library/std/src/gc.rs
+index 853a700b837..7d71f3e0411 100644
+--- a/library/std/src/gc.rs
++++ b/library/std/src/gc.rs
+@@ -414,7 +414,7 @@ pub unsafe fn new_unsynchronised(value: T) -> Self {
+     #[cfg(not(no_global_oom_handling))]
+     unsafe fn new_internal(value: T) -> Self {
+         #[cfg(not(bootstrap))]
+-        if !crate::mem::needs_finalizer::<T>() {
++        if !crate::mem::needs_drop::<T>() {
+             return Self::from_inner(
+                 Box::leak(Box::new_in(GcBox { finalizer: None, value }, GcAllocator)).into(),
+             );
+-- 
+2.39.2
+

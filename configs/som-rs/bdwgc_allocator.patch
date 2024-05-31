@@ -1,0 +1,47 @@
+From bafb115a5a0e644eff1418eddb471cd62f4b6338 Mon Sep 17 00:00:00 2001
+From: Jake Hughes <jake@bencher16.soft-dev.org>
+Date: Thu, 30 May 2024 20:50:56 +0100
+Subject: [PATCH] BDWGCAlloc
+
+---
+ boehm_rc.sh                    | 2 ++
+ som-interpreter-bc/src/main.rs | 6 ++++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+ create mode 100755 boehm_rc.sh
+
+diff --git a/boehm_rc.sh b/boehm_rc.sh
+new file mode 100755
+index 0000000..759378e
+--- /dev/null
++++ b/boehm_rc.sh
+@@ -0,0 +1,2 @@
++#! /bin/sh
++GC_DONT_GC=true `pwd`/boehm_rc/release/som-interpreter-bc $@
+diff --git a/som-interpreter-bc/src/main.rs b/som-interpreter-bc/src/main.rs
+index 62aa750..f5ef7f8 100644
+--- a/som-interpreter-bc/src/main.rs
++++ b/som-interpreter-bc/src/main.rs
+@@ -2,6 +2,7 @@
+ //! This is the interpreter for the Simple Object Machine.
+ //!
+ #![warn(missing_docs)]
++#![feature(gc)]
+ 
+ use std::path::PathBuf;
+ use std::rc::Rc;
+@@ -19,9 +20,10 @@ use som_interpreter_bc::method::{Method, MethodKind};
+ use som_interpreter_bc::universe::Universe;
+ use som_interpreter_bc::value::Value;
+ 
+-#[cfg(feature = "jemalloc")]
++// #[cfg(feature = "jemalloc")]
++use std::gc::GcAllocator;
+ #[global_allocator]
+-static GLOBAL: Jemalloc = Jemalloc;
++static GLOBAL: GcAllocator = GcAllocator;
+ 
+ #[derive(Debug, Clone, PartialEq, clap::StructOpt)]
+ #[clap(about, author)]
+-- 
+2.39.2
+

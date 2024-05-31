@@ -1,0 +1,88 @@
+From 03d77eae41c863a7d41ee10cd0567b9e1ab6b20f Mon Sep 17 00:00:00 2001
+From: Jake Hughes <jake@bencher16.soft-dev.org>
+Date: Mon, 3 Jun 2024 15:10:28 +0100
+Subject: [PATCH] Tune benchmark inner iters
+
+---
+ rebench.conf | 52 ++++++++++++++++++++++++++--------------------------
+ 1 file changed, 26 insertions(+), 26 deletions(-)
+
+diff --git a/rebench.conf b/rebench.conf
+index ccbf137..cfa29cb 100644
+--- a/rebench.conf
++++ b/rebench.conf
+@@ -13,7 +13,7 @@ reporting:
+         project_name: som-rs
+ 
+ runs:
+-    max_invocation_time: 60
++    max_invocation_time: 180
+ 
+ benchmark_suites:
+     macro:
+@@ -22,37 +22,37 @@ benchmark_suites:
+         iterations: 10
+         benchmarks:
+             - Richards:     {extra_args: 1}
+-            - DeltaBlue:    {extra_args: 50}
+-            - NBody:        {extra_args: 500}
+-            - JsonSmall:    {extra_args: 1}
+-            - GraphSearch:  {extra_args: 4}
+-            - PageRank:     {extra_args: 40}
++            - DeltaBlue:    {extra_args: 500}
++            - NBody:        {extra_args: 7000}
++            - JsonSmall:    {extra_args: 15}
++            - GraphSearch:  {extra_args: 12}
++            - PageRank:     {extra_args: 150}
+ 
+     micro:
+         gauge_adapter: RebenchLog
+         command: "-c core-lib/Smalltalk core-lib/Examples/Benchmarks core-lib/Examples/Benchmarks/LanguageFeatures -- BenchmarkHarness %(benchmark)s %(iterations)s "
+         iterations: 10
+         benchmarks:
+-            - Fannkuch:     {extra_args: 6}
+-            - Fibonacci:    {extra_args: "3"}
+-            - Dispatch:     {extra_args: 2}
+-            - Bounce:       {extra_args: "2"}
+-            - Loop:         {extra_args: 5}
+-            - Permute:      {extra_args: "3"}
+-            - Queens:       {extra_args: "2"}
+-            - List:         {extra_args: "2"}
+-            - Recurse:      {extra_args: "3"}
+-            - Storage:      {extra_args: 1}
+-            - Sieve:        {extra_args: 4}
+-            - BubbleSort:   {extra_args: "3"}
+-            - QuickSort:    {extra_args: 1}
+-            - Sum:          {extra_args: 2}
+-            - Towers:       {extra_args: "2"}
+-            - TreeSort:     {extra_args: "1"}
+-            - IntegerLoop:  {extra_args: 2}
+-            - FieldLoop:    {extra_args: 1}
+-            - WhileLoop:    {extra_args: 10}
+-            - Mandelbrot:   {extra_args: 30}
++            - Fannkuch:     {extra_args: 7}
++            - Fibonacci:    {extra_args: "20"}
++            - Dispatch:     {extra_args: 30}
++            - Bounce:       {extra_args: "30"}
++            - Loop:         {extra_args: 30}
++            - Permute:      {extra_args: "30"}
++            - Queens:       {extra_args: "25"}
++            - List:         {extra_args: "20"}
++            - Recurse:      {extra_args: "30"}
++            - Storage:      {extra_args: 20}
++            - Sieve:        {extra_args: 30}
++            - BubbleSort:   {extra_args: "30"}
++            - QuickSort:    {extra_args: 40}
++            - Sum:          {extra_args: 20}
++            - Towers:       {extra_args: "20"}
++            - TreeSort:     {extra_args: "20"}
++            - IntegerLoop:  {extra_args: 15}
++            - FieldLoop:    {extra_args: 10}
++            - WhileLoop:    {extra_args: 60}
++            - Mandelbrot:   {extra_args: 100}
+ 
+ executors:
+     som-rs-ast:
+-- 
+2.39.2
+
