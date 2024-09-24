@@ -1,7 +1,7 @@
 #! /bin/sh
 
 set -e
-ALLOYSV=8851851296ef352942f6654889f4ab176fafcead
+ALLOYSV=f07e460fe8bfba7490bdf62870326d634862d1bf
 ALLOY_DIR="alloy"
 ALLOY_PATCH_DIR=../configs/alloy
 
