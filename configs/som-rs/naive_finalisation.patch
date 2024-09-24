@@ -1,12 +1,3 @@
-From 73f08a452c45e9c4a97067577b20d3c9ebf6ec0d Mon Sep 17 00:00:00 2001
-From: Jake Hughes <jake@bencher16.soft-dev.org>
-Date: Fri, 10 May 2024 11:59:56 +0100
-Subject: [PATCH] naive_finalisation
-
----
- som-interpreter-bc/src/main.rs | 7 +++++++
- 1 file changed, 7 insertions(+)
-
 diff --git a/som-interpreter-bc/src/main.rs b/som-interpreter-bc/src/main.rs
 index 951bf39..e83cf88 100644
 --- a/som-interpreter-bc/src/main.rs
@@ -24,7 +15,4 @@ index 951bf39..e83cf88 100644
 +    let _ = results.write(&finalised.to_string().into_bytes());
      Ok(())
  }
- 
--- 
-2.39.2
 

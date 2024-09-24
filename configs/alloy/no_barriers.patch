@@ -1,30 +1,21 @@
-From 31bea1366656bba4729e910488e162e9cf9ed109 Mon Sep 17 00:00:00 2001
-From: Jake Hughes <jake@bencher16.soft-dev.org>
-Date: Fri, 10 May 2024 11:17:10 +0100
-Subject: [PATCH] no_barriers
-
----
- compiler/rustc_mir_transform/src/lib.rs |  1 -
- library/std/src/gc.rs                   | 30 -------------------------
- 2 files changed, 31 deletions(-)
-
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
-index e590a80b441..dd5bbc3adfa 100644
+index e590a80b441..8e5cac3f51c 100644
 --- a/compiler/rustc_mir_transform/src/lib.rs
 +++ b/compiler/rustc_mir_transform/src/lib.rs
-@@ -617,7 +617,6 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
+@@ -616,8 +616,6 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
+             &multiple_return_terminators::MultipleReturnTerminators,
              &deduplicate_blocks::DeduplicateBlocks,
              &large_enums::EnumSizeOpt { discrepancy: 128 },
-             // Must come before CriticalCallEdges to prevent LLVM basic block ordering errors.
+-            // Must come before CriticalCallEdges to prevent LLVM basic block ordering errors.
 -            &remove_gc_drops::RemoveGcDrops,
              // Some cleanup necessary at least for LLVM and potentially other codegen backends.
              &add_call_guards::CriticalCallEdges,
              // Cleanup for human readability, off by default.
 diff --git a/library/std/src/gc.rs b/library/std/src/gc.rs
-index 7af0e547c25..4dd6e9096c0 100644
+index c4d505176ca..398de01103a 100644
 --- a/library/std/src/gc.rs
 +++ b/library/std/src/gc.rs
-@@ -244,36 +244,6 @@ impl<T: ?Sized + Unsize<U>, U: ?Sized> CoerceUnsized<Gc<U>> for Gc<T> {}
+@@ -213,32 +213,6 @@ impl<T: ?Sized + Unsize<U>, U: ?Sized> CoerceUnsized<Gc<U>> for Gc<T> {}
  #[unstable(feature = "gc", issue = "none")]
  impl<T: ?Sized + Unsize<U>, U: ?Sized> DispatchFromDyn<Gc<U>> for Gc<T> {}
  
@@ -50,17 +41,10 @@ index 7af0e547c25..4dd6e9096c0 100644
 -#[cfg(all(not(bootstrap), not(test)))]
 -impl<T: ?Sized> Drop for Gc<T> {
 -    fn drop(&mut self) {
--        unsafe {
--            // asm macro clobber by default, so this is enough to introduce a
--            // barrier.
--            core::arch::asm!("/* {0} */", in(reg) self);
--        }
+-        keep_alive(self);
 -    }
 -}
 -
  impl<T: ?Sized> Gc<T> {
      #[inline(always)]
      fn inner(&self) -> &GcBox<T> {
--- 
-2.39.2
-

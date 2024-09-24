@@ -1,24 +1,13 @@
-From 561f1ce6dd762ada71f082af73ac0ee48a0932ae Mon Sep 17 00:00:00 2001
-From: Jake Hughes <jh@jakehughes.uk>
-Date: Thu, 9 May 2024 22:28:19 +0100
-Subject: [PATCH] All barriers
-
----
- compiler/rustc_mir_transform/src/lib.rs | 1 -
- 1 file changed, 1 deletion(-)
-
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
-index 41403006d7e..99cc6bddb70 100644
+index e590a80b441..8e5cac3f51c 100644
 --- a/compiler/rustc_mir_transform/src/lib.rs
 +++ b/compiler/rustc_mir_transform/src/lib.rs
-@@ -578,7 +578,6 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
+@@ -616,8 +616,6 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
+             &multiple_return_terminators::MultipleReturnTerminators,
              &deduplicate_blocks::DeduplicateBlocks,
              &large_enums::EnumSizeOpt { discrepancy: 128 },
-             // Must come before CriticalCallEdges to prevent LLVM basic block ordering errors.
+-            // Must come before CriticalCallEdges to prevent LLVM basic block ordering errors.
 -            &remove_gc_drops::RemoveGcDrops,
              // Some cleanup necessary at least for LLVM and potentially other codegen backends.
              &add_call_guards::CriticalCallEdges,
              // Cleanup for human readability, off by default.
--- 
-2.44.0
-
