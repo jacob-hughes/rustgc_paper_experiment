@@ -75,6 +75,25 @@ mk_early_finaliser_exp() {
     mk_somrs_cfg $ALLOY_BARRIERS_NONE "use_gc.patch"
 }
 
+mk_finaliser_elision_exp() {
+    mk_alloy_cfg $ALLOY_FINALISATION_NAIVE "disable_finaliser_elision.patch"
+    mk_somrs_cfg $ALLOY_FINALISATION_NAIVE "use_gc.patch" "naive_finalisation.patch"
+
+    mk_alloy_cfg $ALLOY_FINALISATION_OPT
+    mk_somrs_cfg $ALLOY_FINALISATION_OPT "use_gc.patch" "optimised_finalisation.patch"
+}
+
 # ============= Build Alloy with each configuration =====================
+if [ ! -d ${ALLOY_DIR} ]; then
+    git clone https://github.com/softdevteam/alloy ${ALLOY_DIR}
+    (cd ${ALLOY_DIR} && git checkout ${ALLOYSV})
+fi
+
+if [ ! -d ${SOMRS_DIR} ]; then
+    git clone --recursive https://github.com/Hirevo/som-rs ${SOMRS_DIR}
+    (cd ${SOMRS_DIR} && git checkout ${SOMRSSV})
+fi
+
 mk_early_finaliser_exp
+mk_finaliser_elision_exp
 
