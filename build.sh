@@ -15,37 +15,25 @@ ALLOY_FINALISATION_OPT=finalisation_opt
 BOOTSTRAP_STAGE=1
 
 SOMRSSV=35b780cbee765cca24201fe063d3f1055ec7f608
-ALLOY_DIR="som-rs"
+SOMRS_DIR="som-rs"
 SOMRS_PATCH_DIR=../configs/som-rs
 
 YKSOMSV=fc7c7c131ba93b7e3c85a172fbcc245f29c324d6
 WLAMBDASV=b370e342fdffeae6f
 
-if [ ! -d alloy ]; then
-    git clone https://github.com/softdevteam/alloy
-    cd alloy && git checkout ${ALLOYSV}
-fi
-
-if [ ! -d som-rs ]; then
-    git clone --recursive https://github.com/Hirevo/som-rs
-    cd som-rs && git checkout ${SOMRSSV}
-fi
-
 mk_alloy_cfg() {
     prefix=$1
     shift
-    echo "${ALLOY_DIR}/${prefix}.lock"
     if [ -f "${ALLOY_DIR}/${prefix}.lock" ]; then
 	echo "WARNING: '${ALLOY_DIR}/${prefix}' already exists. Skipping build."
 	echo "WARNING: To force a rebuild, remove the '${ALLOY_DIR}/${prefix}.lock' file."
 	return
     fi
-    shift
-    (cd alloy && \
-	git checkout ${ALLOYSV} && \
+    (cd ${ALLOY_DIR} && \
+	git reset --hard && \
 	for patch in "$@"
 	do
-	    git am "${ALLOY_PATCH_DIR}/${patch}"
+	    git apply "${ALLOY_PATCH_DIR}/${patch}"
 	done && \
 	python3 x.py install --config ../benchmark.config.toml \
 	    --stage ${BOOTSTRAP_STAGE} \
@@ -60,18 +48,18 @@ mk_somrs_cfg() {
     prefix=$1
     shift
     rustc="../${ALLOY_DIR}/${prefix}/bin/rustc"
-    if [ -f "som-rs/${prefix}.lock" ]; then
+    if [ -f "${SOMRS_DIR}/${prefix}.lock" ]; then
 	echo "WARNING: '${SOMRS_DIR}/${prefix}' already exists. Skipping build."
 	echo "WARNING: To force a rebuild, remove the 'som-rs/${prefix}.lock' file."
 	return
     fi
-    (cd som-rs && \
-	git checkout ${SOMRSSV} && \
+    (cd ${SOMRS_DIR} && \
+	git reset --hard && \
 	for patch in "$@"
 	do
-	    git am "${SOMRS_PATCH_DIR}/${patch}"
+	    git apply "${SOMRS_PATCH_DIR}/${patch}"
 	done && \
-	RUSTC="$rustc" cargo build --release -p som-interpreter-bc --target-dir=${1} &&
+	RUSTC="$rustc" cargo build --release -p som-interpreter-bc --target-dir=${prefix} &&
 	touch ${prefix}.lock
     )
 }
