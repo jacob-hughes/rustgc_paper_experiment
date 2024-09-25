@@ -1,12 +1,3 @@
-From a9ad8991cc90bb4467882a9b1a17d3f9e5e890e7 Mon Sep 17 00:00:00 2001
-From: Jake Hughes <jake@bencher16.soft-dev.org>
-Date: Fri, 10 May 2024 12:43:10 +0100
-Subject: [PATCH] rebench_perf
-
----
- rebench.conf | 16 ++++++++++------
- 1 file changed, 10 insertions(+), 6 deletions(-)
-
 diff --git a/rebench.conf b/rebench.conf
 index ccbf137..496bc6f 100644
 --- a/rebench.conf
@@ -16,18 +7,18 @@ index ccbf137..496bc6f 100644
  
  executors:
 -    som-rs-ast:
-+    all_barriers:
++    barriers_naive:
          path: .
 -        executable: ./target/release/som-interpreter-ast
 -    som-rs-bc:
-+        executable: ./all_barriers/release/som-interpreter-bc
-+    no_barriers:
++        executable: ./barriers_naive/release/som-interpreter-bc
++    barriers_none:
          path: .
 -        executable: ./target/release/som-interpreter-bc
-+        executable: ./no_barriers/release/som-interpreter-bc
-+    opt_barriers:
++        executable: ./barriers_none/release/som-interpreter-bc
++    barriers_opt:
 +        path: .
-+        executable: ./opt_barriers/release/som-interpreter-bc
++        executable: ./barriers_opt/release/som-interpreter-bc
  
  # define the benchmarks to be executed for a re-executable benchmark run
  experiments:
@@ -37,9 +28,7 @@ index ccbf137..496bc6f 100644
          executions:
 -            - som-rs-ast
 -            - som-rs-bc
-+            - all_barriers
-+            - no_barriers
-+            - opt_barriers
--- 
-2.39.2
++            - barriers_naive
++            - barriers_none
++            - barriers_opt
 

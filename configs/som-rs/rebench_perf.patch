@@ -1,12 +1,3 @@
-From 0028234f555d550d429049155192358023074d8f Mon Sep 17 00:00:00 2001
-From: Jake Hughes <jake@bencher16.soft-dev.org>
-Date: Fri, 10 May 2024 12:43:10 +0100
-Subject: [PATCH] rebench_perf
-
----
- rebench.conf | 12 ++++++------
- 1 file changed, 6 insertions(+), 6 deletions(-)
-
 diff --git a/rebench.conf b/rebench.conf
 index ccbf137..1158997 100644
 --- a/rebench.conf
@@ -36,6 +27,4 @@ index ccbf137..1158997 100644
 -            - som-rs-bc
 +            - som-rs-rc
 +            - som-rs-gc
--- 
-2.39.2
 
