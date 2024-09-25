@@ -24,9 +24,11 @@ def confidence_interval(l):
     Z = 2.576  # 99% interval
     return Z * (stdev(l) / math.sqrt(len(l)))
 
-def process_graph(name, p, all, opt, none):
+def process_graph(input, output):
+    print("Processing results from %s" % input)
     results = {}
-    with open(p) as f:
+    cfgs = set()
+    with open(input) as f:
         for l in f.readlines():
             if l.startswith("#"):
                 continue
@@ -43,6 +45,7 @@ def process_graph(name, p, all, opt, none):
                 results[bm] = {}
 
             cfg = s[6]
+            cfgs.add(cfg)
 
             if cfg not in results[bm]:
                 results[bm][cfg] = []
@@ -50,42 +53,27 @@ def process_graph(name, p, all, opt, none):
             results[bm][cfg].append(float(s[2]))
 
     benchmarks = []
-    all_barriers_means = []
-    opt_barriers_means = []
-    none_barriers_means = []
-    all_barriers_cis = []
-    opt_barriers_cis = []
-    none_barriers_cis = []
-
-    for bm, runs in dict(sorted(results.items())).items():
-        if opt not in runs:
-            print("No results for ", bm)
-            continue
+    means = []
+    cis = []
+    labels = list(sorted(cfgs))
+    for bm, cfgs in dict(sorted(results.items())).items():
+        if len(cfgs.keys()) != len(labels):
+              print("Not all cfgs have results for %s, skipping..." % bm)
+              continue
         benchmarks.append(bm)
-        all_barriers_runs = []
-        opt_barriers_runs = []
-        none_barriers_runs = []
-        for a, o, n in zip(runs[all], runs[opt], runs[none]):
-            all_barriers_runs.append(a)
-            opt_barriers_runs.append(o)
-            none_barriers_runs.append(n)
 
-        all_barriers_means.append(mean(all_barriers_runs))
-        opt_barriers_means.append(mean(opt_barriers_runs))
-        none_barriers_means.append(mean(none_barriers_runs))
-        all_barriers_cis.append(confidence_interval(all_barriers_runs))
-        opt_barriers_cis.append(confidence_interval(opt_barriers_runs))
-        none_barriers_cis.append(confidence_interval(none_barriers_runs))
+        means.append(tuple([mean(v) for (k,v) in sorted(cfgs.items())]))
+        cis.append(tuple([confidence_interval(v) for (k,v) in sorted(cfgs.items())]))
 
     sns.set(style="whitegrid")
     plt.rc('text', usetex=False)
     plt.rc('font', family='sans-serif')
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    df = pd.DataFrame(zip(all_barriers_means, opt_barriers_means, none_barriers_means), index=benchmarks)
-    errs = pd.DataFrame(zip(all_barriers_cis, opt_barriers_cis, none_barriers_cis), index=benchmarks)
+    df = pd.DataFrame(means, index=benchmarks)
+    errs = pd.DataFrame(cis, index=benchmarks)
     plot = df.plot(kind='bar', width=0.8, ax=ax, yerr=errs)
     plot.margins(x=0.01)
-    ax.legend(['All', 'Opt', 'None'])
+    ax.legend(labels)
 
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -103,8 +91,10 @@ def process_graph(name, p, all, opt, none):
     formatter.set_scientific(False)
     ax.yaxis.set_major_formatter(formatter)
     plt.tight_layout()
-    plt.savefig(name, format="svg", bbox_inches="tight")
+    plt.savefig(output, format="svg", bbox_inches="tight")
+    print("Graph saved to '%s'" % output)
 
 
-# process_graph("som_rs_barriers.svg", "raw_data/som-rs-barriers.data", 'all_barriers', 'opt_barriers', 'no_barriers')
-process_graph("somrs_barriers_old.svg", "raw_data/barriers_exp.data", 'barriers_naive', 'barriers_opt', 'barriers_none')
+infile = sys.argv[1]
+outfile = sys.argv[2]
+process_graph(infile, outfile)
