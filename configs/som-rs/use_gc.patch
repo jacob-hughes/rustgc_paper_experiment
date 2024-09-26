@@ -49,7 +49,7 @@ index e454856..c24ac9d 100644
  It is AST-based, in that it works by recursively traversing and evaluating nodes from the Abstract Syntax Tree from **`som-core`**.  
  
 -Resources are managed and tracked through reference-counting (using Rust's **`Rc`**/**`Weak`** types).  
-+Resources are managed and tracked through reference-counting (using Rust's **`Gc`**/**`Weak`** types).  
++Resources are managed and tracked through reference-counting (using Rust's **`Gc`**/**`Weak`** types).
 diff --git a/som-interpreter-ast/src/class.rs b/som-interpreter-ast/src/class.rs
 index c4d21e1..30a46d9 100644
 --- a/som-interpreter-ast/src/class.rs
@@ -794,7 +794,7 @@ index 48a6539..57f5fa0 100644
  It is bytecode-based, in that it works by compiling nodes from the Abstract Syntax Tree from **`som-core`** into stack-based bytecode instructions and then executing them.  
  
 -Resources are managed and tracked through reference-counting (using Rust's **`Rc`**/**`Weak`** types).  
-+Resources are managed and tracked through reference-counting (using Rust's **`Gc`**/**`Weak`** types).  
++Resources are managed and tracked through reference-counting (using Rust's **`Gc`**/**`Weak`** types).
 diff --git a/som-interpreter-bc/src/block.rs b/som-interpreter-bc/src/block.rs
 index d4719cc..b4b2400 100644
 --- a/som-interpreter-bc/src/block.rs
