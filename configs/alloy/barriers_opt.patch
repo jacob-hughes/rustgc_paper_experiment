@@ -1,0 +1,13 @@
+diff --git a/library/std/src/gc.rs b/library/std/src/gc.rs
+index c4d505176ca..a12c9c35122 100644
+--- a/library/std/src/gc.rs
++++ b/library/std/src/gc.rs
+@@ -381,7 +381,7 @@ pub unsafe fn new_unsynchronised(value: T) -> Self {
+     #[cfg(not(no_global_oom_handling))]
+     unsafe fn new_internal(value: T) -> Self {
+         #[cfg(not(bootstrap))]
+-        if !crate::mem::needs_finalizer::<T>() {
++        if !crate::mem::needs_drop::<T>() {
+             return Self::from_inner(Box::leak(Box::new_in(GcBox { value }, GcAllocator)).into());
+         }
+ 
