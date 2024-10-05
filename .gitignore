@@ -1,8 +1,6 @@
-/alloy/
-/som-rs/
-/yksom/
-/WLambda/
-alloy.lock
-som-rs.lock
-yksom.lock
+alloy/
+som-rs/
+yksom/
 raw_data/
+venv/
+bdwgc/
