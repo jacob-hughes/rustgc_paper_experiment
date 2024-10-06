@@ -1,11 +1,3 @@
-diff --git a/boehm_rc.sh b/boehm_rc.sh
-new file mode 100755
-index 0000000..759378e
---- /dev/null
-+++ b/boehm_rc.sh
-@@ -0,0 +1,2 @@
-+#! /bin/sh
-+GC_DONT_GC=true `pwd`/rc/release/som-interpreter-bc $@
 diff --git a/som-interpreter-bc/src/main.rs b/som-interpreter-bc/src/main.rs
 index 62aa750..f5ef7f8 100644
 --- a/som-interpreter-bc/src/main.rs

@@ -8,6 +8,10 @@ debug = false
 [build]
 install-stage = 2
 
+[llvm]
+download-ci-llvm = false
+
 [install]
 prefix = "build/alloy-stage2-latest"
 sysconfdir = "etc"
+

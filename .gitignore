@@ -1,6 +1,7 @@
-alloy/
-som-rs/
+/alloy/
+/som-rs/
 yksom/
 raw_data/
 venv/
 bdwgc/
+/bin/

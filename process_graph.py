@@ -207,7 +207,7 @@ def write_stats(f, exp):
 results_dir = os.environ['RESULTS_DIR']
 experiments = []
 
-e = load_exp('som_rs', 'perf')
+e = load_exp('som-rs', 'perf')
 e.latex_name = r'\somrsperf'
 
 e.baseline = 'perf_rc'
