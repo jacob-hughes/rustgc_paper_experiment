@@ -6,6 +6,7 @@ from statistics import geometric_mean, stdev
 import numpy as np
 import pandas as pd
 import pprint
+import csv
 
 import matplotlib
 matplotlib.use('Agg')
@@ -27,6 +28,21 @@ import matplotlib.pyplot as plt
 
 results = {}
 pp = pprint.PrettyPrinter(indent=4)
+
+PEXECS = int(os.environ['PEXECS'])
+ITERS = int(os.environ['ITERS'])
+
+def mean(l):
+    return math.fsum(l) / float(len(l))
+
+def confidence_interval(l):
+    Z = 2.576  # 99% interval
+    return Z * (stdev(l) / math.sqrt(len(l)))
+
+def flatten(l):
+  return [y for x in l for y in x]
+
+
 class PExec:
     def __init__(self, num, cfg, benchmark, iters):
         self.num = num
@@ -42,6 +58,9 @@ class Experiment:
         self.vm = vm
         self.name = name
         self.pexecs = pexecs
+
+    def latex_name(self):
+        return f"\\{self.vm}{self.name}".replace("-","")
 
     def geomean(self, cfg, benchmark='all'):
         return geometric_mean(self.iters(cfg, benchmark))
@@ -71,34 +90,66 @@ class Experiment:
     def benchmarks(self):
         return sorted(list({p.benchmark for p in self.pexecs}))
 
-    def diff(self, cfg, baseline, benchmark = 'all'):
+    def diff(self, cfg, baseline, benchmark = 'all', geomean = False):
+        if geomean:
+            return self.geomean(baseline, benchmark) - self.geomean(cfg, benchmark)
         return self.mean(baseline, benchmark) - self.mean(cfg, benchmark)
 
-    def speedup(self, cfg, baseline, benchmark = 'all'):
+    def speedup(self, cfg, baseline, benchmark = 'all', geomean = False):
+        if geomean:
+            return self.geomean(baseline, benchmark) / self.geomean(cfg, benchmark)
         return self.mean(baseline, benchmark) / self.mean(cfg, benchmark)
+
+    def percent(self, cfg, baseline, benchmark = 'all', geomean = False):
+        a = self.geomean(cfg, benchmark)
+        b = self.geomean(baseline, benchmark)
+        return (abs(a - b) / b) * 100
 
     def dump_stats(self):
         mapper = {
             "perf_gc": "gc",
             "perf_rc": "rc",
+            "finalise_naive": "fnaive",
+            "finalise_elide": "felide",
+            "barriers_none": "bnone",
+            "barriers_naive": "bnaive",
+            "barriers_opt": "bopt",
             "all" : "all"
         }
+        baseline = {
+            "perf": "perf_rc",
+            "elision": "finalise_naive",
+            "barriers": "barriers_none",
+        }
         stats = dict((mapper[cfg], {}) for cfg in self.cfgs())
-        baseline = 'perf_rc'
         for cfg in self.cfgs():
-            for benchmark in self.benchmarks() + ['all']:
+            for benchmark in self.benchmarks():
                 stats[mapper[cfg]][benchmark.lower()] = {
                     'mean' : f"{self.mean(cfg, benchmark):.2f}",
-                    'diff' : f"{self.diff(cfg, baseline, benchmark):.2f}",
-                    'speedup' : f"{self.speedup(cfg, baseline, benchmark):.2f}",
+                    'diff' : f"{self.diff(cfg, baseline[self.name], benchmark):.2f}",
+                    'speedup' : f"{self.speedup(cfg, baseline[self.name], benchmark):.2f}",
                 }
+            # Use geomean for all benchmarks
+            stats[mapper[cfg]]['all'] = {
+                'geomean' : f"{self.geomean(cfg, benchmark):.2f}",
+                'diff' : f"{self.diff(cfg, baseline[self.name], benchmark, geomean = True):.2f}",
+                'speedup' : f"{self.speedup(cfg, baseline[self.name], benchmark, geomean = True):.2f}",
+                'percent' : f"{self.percent(cfg, baseline[self.name], benchmark, geomean = True):.2f}\\%",
+            }
+            print(f"{cfg}: {stats[mapper[cfg]]['all']['percent']}")
 
         return stats
 
-def load_exp(vm, exp):
-    datafile = os.path.join(os.environ['RESULTS_DIR'], vm, exp, os.environ['REBENCH_DATA'])
+def load_exp(exp_dir):
+    parts = exp_dir.split(os.sep)
+    exp = parts[-1]
+    vm = parts[-2]
+    print(vm)
+    print(exp)
+    rbdata = os.path.join(exp_dir, "results.data")
     pexecs = {}
-    with open(datafile) as f:
+    stats =  {}
+    with open(rbdata) as f:
         for l in f.readlines():
             if l.startswith("#"):
                 continue
@@ -117,22 +168,39 @@ def load_exp(vm, exp):
             iter = s[1]
             time = float(s[2])
 
+            if cfg not in stats:
+                stats[cfg] = {}
+            if benchmark not in stats[cfg]:
+                stats[cfg][benchmark] = {
+                    'finalisers_registered': [],
+                    'finalisers_run': [],
+                    'gc_allocations': [],
+                    'rust_allocations': [],
+                    'gc_cycles': [],
+                }
+
             if (invocation, benchmark, cfg) not in pexecs:
                 pexecs[(invocation, benchmark, cfg)] = PExec(invocation, cfg, benchmark, [time])
             else:
                 pexecs[(invocation, benchmark, cfg)].iters.append(time)
 
-    return Experiment(vm, exp, list(pexecs.values()))
+    experiment = Experiment(vm, exp, list(pexecs.values()))
 
-def mean(l):
-    return math.fsum(l) / float(len(l))
+    for cfg in stats.keys():
+        p = os.path.join(exp_dir, f"{cfg}.log")
+        if os.path.exists(p):
+            with open(p, "r") as f:
+                for l in f.readlines():
+                    s = [x.strip() for x in l.split(',')]
+                    bm = s[0]
+                    stats[cfg][bm]['finalisers_registered'].append(int(s[1]))
+                    stats[cfg][bm]['finalisers_run'].append(int(s[2]))
+                    stats[cfg][bm]['gc_allocations'].append(int(s[3]))
+                    stats[cfg][bm]['rust_allocations'].append(int(s[4]))
+                    stats[cfg][bm]['gc_cycles'].append(int(s[5]))
+    experiment.gc_stats = stats
+    return experiment
 
-def confidence_interval(l):
-    Z = 2.576  # 99% interval
-    return Z * (stdev(l) / math.sqrt(len(l)))
-
-def flatten(l):
-  return [y for x in l for y in x]
 
 def plot_bar(exp):
     means = [[mean(exp.iters(cfg, benchmark)) for benchmark in exp.benchmarks()] for cfg in exp.cfgs()]
@@ -141,12 +209,12 @@ def plot_bar(exp):
     sns.set(style="whitegrid")
     # plt.rc('text', usetex=False)
     # plt.rc('font', family='sans-serif')
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(4, 4))
     df = pd.DataFrame(zip(*means), index=exp.benchmarks())
-    print(exp.benchmarks())
-    plot = df.plot(kind='bar', width=0.8, ax=ax)
+    errs = pd.DataFrame(zip(*cis), index=exp.benchmarks())
+    plot = df.plot(kind='bar', width=0.8, ax=ax, yerr=errs)
     plot.margins(x=0.01)
-    ax.legend(exp.cfgs())
+    ax.legend(exp.cfgs()).remove()
 
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -165,8 +233,18 @@ def plot_bar(exp):
     formatter.set_scientific(False)
     ax.yaxis.set_major_formatter(formatter)
     plt.tight_layout()
-    plt.savefig(f"{exp.vm}_{exp.name}.svg", format="svg", bbox_inches="tight")
+    plt.savefig(f"plots/{exp.vm}_{exp.name}.svg", format="svg", bbox_inches="tight")
     print("Graph saved to '%s'" % f"{exp.vm}_{exp.name}.svg")
+
+def make_table(exp):
+    bms = exp.benchmarks()
+    with open(f"plots/{exp.vm}_{exp.name}.tex", "w") as f:
+            # f.write(f" & {bm}")
+        for (cfg, values) in exp.gc_stats.items():
+            f.write(f"{cfg} &")
+            for bm in exp.benchmarks():
+                f.write(f" {mean(values[bm]['finalisers_run'])} &\n")
+
 
 def write_stats(f, exp):
     def depth(d):
@@ -192,30 +270,12 @@ def write_stats(f, exp):
         for k, v in d.items():
             f.write(f"}}")
     stats = exp.dump_stats()
-    f.write(f"\\newcommand{{{exp.latex_name}}}[{depth(stats)}]{{%\n")
+    f.write(f"\\newcommand{{{exp.latex_name()}}}[{depth(stats)}]{{%\n")
     make_args(stats, 1)
-    f.write(f"}}")
-
-    # somrsperfdata
-    # cfg: bench: mean, geomean, diff, speedup, finalised, objects, peakmem, avgmem
-    # cfg: all: mean, geomean, diff, speedup, finalised, objects, peakmem, avgmem
-
-    # \pexecs{somrsperf}
-    # \iters{somrsperf}
-    # \somrsperf{gc}{all}{geomean}
-
-results_dir = os.environ['RESULTS_DIR']
-experiments = []
-
-e = load_exp('som-rs', 'perf')
-e.latex_name = r'\somrsperf'
-
-e.baseline = 'perf_rc'
-experiments.append(e)
-
-for e in experiments:
+    f.write(f"}}%\n")
+for arg in sys.argv[1:]:
+    e = load_exp(arg)
+    # make_table(e)
     plot_bar(e)
-
-with open("experiment_stats.tex", "w") as f:
-    for e in experiments:
-        write_stats(f, e)
+    # with open("plots/experiment_stats.tex", "a") as f:
+    #         write_stats(f, e)

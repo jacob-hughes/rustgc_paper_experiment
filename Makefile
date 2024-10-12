@@ -3,10 +3,10 @@ PYTHON = python3
 BIN = $(PWD)/bin
 RESULTS = results
 
-export RESULTS_DIR ?= results_test
-export REBENCH_DATA ?= results.data
-PEXECS ?= 1
-ITERS ?= 2
+RESULTS_DIR = results
+REBENCH_DATA = results.data
+export PEXECS ?= 10
+export ITERS ?= 5
 
 VENV_DIR = venv
 PIP = $(VENV_DIR)/bin/pip
@@ -41,16 +41,21 @@ YKSOM_EXPS = $(addprefix $(RESULTS)/yksom/, elision barriers)
 
 YKSOM_CFGS_INSTALL_DIRS = $(addprefix $(PWD)/bin/yksom/, $(YKSOM_CFGS))
 
-EXPERIMENTS = $(SOMRS_EXPS) $(YKSOM_EXPS)
+# EXPERIMENTS = $(SOMRS_EXPS) $(YKSOM_EXPS)
+EXPERIMENTS = $(RESULTS)/regex_redux $(RESULTS)/binary_trees
+# EXPERIMENTS = $(RESULTS)/binary_trees
+
 
 all: bench
 
 .PHONY: build build-som-rs build-yksom build-alloy
 .PHONY: clean clean-builds
-.PHONY: venv
+.PHONY: venv plots
 
-plot-results: bench
-	$(PYTHON_EXEC) process_graph.py $(RESULTS_DIR)
+plots:
+	@echo $(SOMRS_EXPS)
+	mkdir -p plots
+	$(PYTHON_EXEC) process_graph.py $(EXPERIMENTS)
 
 bench: $(EXPERIMENTS)
 
@@ -59,15 +64,24 @@ bench-som-rs: $(SOMRS_EXPS)
 bench-yksom: $(YKSOM_EXPS)
 
 $(EXPERIMENTS):
+	# $(shell basename $(dir $@)).conf $(notdir $@)
 	mkdir -p $@
 	- $(REBENCH_EXEC) -R -D \
 		--invocations ${PEXECS} \
 		--iterations ${ITERS} \
 		-df $@/$(REBENCH_DATA) \
-		$(shell basename $(dir $@)).conf $(notdir $@)
+		regex_redux.conf $(notdir $@)
 
 
 build: build-som-rs build-yksom
+
+
+build-binary-trees: $(ALLOY_SRC_DIR)
+	mkdir -p $(BIN)/binary_trees/
+	cd $(PWD)/clbg && \
+	RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc" \
+	      cargo build --release
+	ln -s $(PWD)/clbg/target/release/* $(BIN)/binary_trees/
 
 build-yksom: $(YKSOM_CFGS_INSTALL_DIRS)
 

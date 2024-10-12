@@ -1,0 +1,32 @@
+diff --git a/som-interpreter-bc/src/main.rs b/som-interpreter-bc/src/main.rs
+index 62aa750..6f0c2e8 100644
+--- a/som-interpreter-bc/src/main.rs
++++ b/som-interpreter-bc/src/main.rs
+@@ -97,6 +97,27 @@ fn main() -> anyhow::Result<()> {
+     //     _ => {}
+     // }
+ 
++    if std::env::var("DUMP_GC_STATS").is_err() {
++       return Ok(());
++    }
++
++    use std::io::Write;
++    let mut file = std::fs::OpenOptions::new()
++        .write(true)
++        .create(true)
++        .append(true)
++        .open(std::env::var("DUMP_GC_STATS").unwrap())?;
++
++    let gcstats = std::gc::stats();
++    write!(file, "{}, {}, {}, {}, {}, {}\n",
++        opts.args[0].clone(),
++        gcstats.finalizers_registered,
++        gcstats.finalizers_completed,
++        gcstats.allocated_gc,
++        gcstats.allocated_normal,
++        gcstats.num_gcs
++    )?;
++
+     Ok(())
+ }
+ 
