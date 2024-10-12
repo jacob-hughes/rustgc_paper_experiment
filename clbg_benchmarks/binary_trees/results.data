@@ -1,0 +1,13 @@
+#!/home/jake/research/rustgc_paper_experiment/venv/bin/rebench -R -D --invocations 1 --iterations 1 -df binary_trees/results.data clbg.conf binary_trees
+# Execution Start: 2024-10-12T21:05:48.557614+00:00
+# Environment: {"userName": "jake", "manualRun": true, "hostName": "bencher16", "osType": "Linux", "memory": 371407712256, "denoise": {}, "cpu": "Intel(R) Xeon(R) Platinum 8452Y", "clockSpeed": 3200000000, "software": [{"name": "kernel", "version": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.94-1 (2024-06-21)"}, {"name": "kernel-release", "version": "6.1.0-22-amd64"}, {"name": "architecture", "version": "x86_64"}]}
+# Source: {"repoURL": "https://github.com/softdevteam/rustgc_paper_experiment", "branchOrTag": "master", "commitId": "502add15d47ac1278d8d48a71ba4c6d55a0bd101", "commitMsg": "WIP\n", "authorName": "Jake Hughes", "committerName": "Jake Hughes", "authorEmail": "jake@bencher16.soft-dev.org", "committerEmail": "jake@bencher16.soft-dev.org"}
+invocation	iteration	value	unit	criterion	benchmark	executor	suite	extraArgs	cores	inputSize	varValue	machine
+1	1	67792.000000	kb	MaxRSS	binary_trees	bt_typed_arena	binary_trees		1			
+1	1	1920.000000	ms	total	binary_trees	bt_typed_arena	binary_trees		1			
+1	1	641964.000000	kb	MaxRSS	binary_trees	bt_rust_gc	binary_trees		1			
+1	1	57140.000000	ms	total	binary_trees	bt_rust_gc	binary_trees		1			
+1	1	164632.000000	kb	MaxRSS	binary_trees	bt_alloy	binary_trees		1			
+1	1	9910.000000	ms	total	binary_trees	bt_alloy	binary_trees		1			
+1	1	216384.000000	kb	MaxRSS	binary_trees	bt_rc	binary_trees		1			
+1	1	15120.000000	ms	total	binary_trees	bt_rc	binary_trees		1			

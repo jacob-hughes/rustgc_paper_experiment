@@ -1,0 +1,9 @@
+#!/home/jake/research/rustgc_paper_experiment/venv/bin/rebench -R -D --invocations 1 --iterations 1 -df regex_redux/results.data clbg.conf regex_redux
+# Execution Start: 2024-10-12T21:07:29.545982+00:00
+# Environment: {"userName": "jake", "manualRun": true, "hostName": "bencher16", "osType": "Linux", "memory": 371407712256, "denoise": {}, "cpu": "Intel(R) Xeon(R) Platinum 8452Y", "clockSpeed": 800000000, "software": [{"name": "kernel", "version": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.94-1 (2024-06-21)"}, {"name": "kernel-release", "version": "6.1.0-22-amd64"}, {"name": "architecture", "version": "x86_64"}]}
+# Source: {"repoURL": "https://github.com/softdevteam/rustgc_paper_experiment", "branchOrTag": "master", "commitId": "502add15d47ac1278d8d48a71ba4c6d55a0bd101", "commitMsg": "WIP\n", "authorName": "Jake Hughes", "committerName": "Jake Hughes", "authorEmail": "jake@bencher16.soft-dev.org", "committerEmail": "jake@bencher16.soft-dev.org"}
+invocation	iteration	value	unit	criterion	benchmark	executor	suite	extraArgs	cores	inputSize	varValue	machine
+1	1	756368.000000	kb	MaxRSS	regex_redux	rr_alloy	regex_redux		1			
+1	1	4160.000000	ms	total	regex_redux	rr_alloy	regex_redux		1			
+1	1	1233276.000000	kb	MaxRSS	regex_redux	rr_rc	regex_redux		1			
+1	1	4220.000000	ms	total	regex_redux	rr_rc	regex_redux		1			

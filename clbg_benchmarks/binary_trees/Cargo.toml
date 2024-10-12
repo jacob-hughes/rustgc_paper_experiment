@@ -1,0 +1,8 @@
+[package]
+name = "binary_trees"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+typed-arena = "*"
+gc = {version = "0.5", features = ["derive"]}

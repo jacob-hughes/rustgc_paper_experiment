@@ -1,0 +1,6 @@
+bin/
+results/
+regex-gc/
+regex-rc/
+results/
+redux_input.txt
