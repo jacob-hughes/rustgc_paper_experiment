@@ -44,6 +44,9 @@ sws:
 	cd sws_benchmarks && \
 		make RUSTC="/home/jake/research/alloy/build/x86_64-unknown-linux-gnu/stage1/bin/rustc"
 
+plot-summary:
+	$(PYTHON_EXEC) process_overview.py
+
 clean-plots: clean-clbg-plots clean-awfy-plots clean-sws-plots
 	rm summary.csv
 

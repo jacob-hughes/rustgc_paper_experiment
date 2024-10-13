@@ -34,6 +34,22 @@ pp = pprint.PrettyPrinter(indent=4)
 PEXECS = int(os.environ['PEXECS'])
 ITERS = int(os.environ['ITERS'])
 
+CFG_LATEX_MAP = {
+    "perf_gc": r"\ourgc",
+    "bt_alloy": r"\ourgc",
+    "rr_alloy": r"\ourgc",
+    "rr_rc": r"\rc",
+    "perf_rc": r"\rc",
+    "bt_rc": r"\rc",
+    "bt_rust_gc": r"\rustgc",
+    "bt_typed_arena": r"\typedarena",
+    "finalise_naive": r"\fnaive",
+    "finalise_elide": r"\felide",
+    "barriers_none": r"\bnone",
+    "barriers_naive": r"\bnaive",
+    "barriers_opt": r"\bopt",
+}
+
 def mean(l):
     return math.fsum(l) / float(len(l))
 
@@ -309,10 +325,10 @@ for arg in args:
             for cfg in e.cfgs():
                 if cfg in overview:
                     (ci_l, ci_u) = e.ci_geomean(cfg)
-                    f.write(f"{e.name},{cfg}, {e.geomean(cfg)}, {ci_l}, {ci_u}\n")
+                    f.write(f"{e.latex_name()},{CFG_LATEX_MAP[cfg]},{e.geomean(cfg)},{ci_l},{ci_u}\n")
                     continue
                 ci = confidence_interval(e.iters(cfg, 'all'))
-                f.write(f"{e.name},{cfg}, {e.mean(cfg)}, {ci}, {ci}\n")
+                f.write(f"{e.latex_name()},{CFG_LATEX_MAP[cfg]},{e.mean(cfg)},{ci},{ci}\n")
     #
     # with open("plots/experiment_stats.tex", "a") as f:
     #         write_stats(f, e)
