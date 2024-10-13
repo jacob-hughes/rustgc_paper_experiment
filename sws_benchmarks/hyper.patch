@@ -1,0 +1,101 @@
+diff --git a/benches/end_to_end.rs b/benches/end_to_end.rs
+index 64efb922..668911fc 100644
+--- a/benches/end_to_end.rs
++++ b/benches/end_to_end.rs
+@@ -270,7 +270,7 @@ impl Opts {
+     }
+ 
+     fn bench(self, b: &mut test::Bencher) {
+-        use std::sync::Arc;
++        use std::gc::Gc as Arc;
+         let _ = pretty_env_logger::try_init();
+         // Create a runtime of current thread.
+         let rt = Arc::new(
+diff --git a/src/client/conn.rs b/src/client/conn.rs
+index a44bc3cc..3c51f3e3 100644
+--- a/src/client/conn.rs
++++ b/src/client/conn.rs
+@@ -58,7 +58,7 @@ use std::error::Error as StdError;
+ use std::fmt;
+ #[cfg(not(all(feature = "http1", feature = "http2")))]
+ use std::marker::PhantomData;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ #[cfg(all(feature = "runtime", feature = "http2"))]
+ use std::time::Duration;
+ 
+diff --git a/src/client/connect/http.rs b/src/client/connect/http.rs
+index afe7b155..d1a9cbc4 100644
+--- a/src/client/connect/http.rs
++++ b/src/client/connect/http.rs
+@@ -5,7 +5,7 @@ use std::io;
+ use std::marker::PhantomData;
+ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+ use std::pin::Pin;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ use std::task::{self, Poll};
+ use std::time::Duration;
+ 
+diff --git a/src/common/exec.rs b/src/common/exec.rs
+index 76f61618..0a60efd9 100644
+--- a/src/common/exec.rs
++++ b/src/common/exec.rs
+@@ -1,7 +1,7 @@
+ use std::fmt;
+ use std::future::Future;
+ use std::pin::Pin;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ 
+ #[cfg(all(feature = "server", any(feature = "http1", feature = "http2")))]
+ use crate::body::Body;
+diff --git a/src/ffi/client.rs b/src/ffi/client.rs
+index 4cdb257e..3609e31f 100644
+--- a/src/ffi/client.rs
++++ b/src/ffi/client.rs
+@@ -1,5 +1,5 @@
+ use std::ptr;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ 
+ use libc::c_int;
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index 3a2202df..ce288a0f 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -5,6 +5,7 @@
+ #![cfg_attr(all(test, feature = "full"), deny(warnings))]
+ #![cfg_attr(all(test, feature = "nightly"), feature(test))]
+ #![cfg_attr(docsrs, feature(doc_cfg))]
++#![feature(gc)]
+ 
+ //! # hyper
+ //!
+diff --git a/src/proto/h1/conn.rs b/src/proto/h1/conn.rs
+index 7d7c3fd2..f6170b4f 100644
+--- a/src/proto/h1/conn.rs
++++ b/src/proto/h1/conn.rs
+@@ -1334,7 +1334,7 @@ mod tests {
+ 
+     #[test]
+     fn test_conn_parking() {
+-        use std::sync::Arc;
++        use std::gc::Gc as Arc;
+         use futures::executor::Notify;
+         use futures::executor::NotifyHandle;
+ 
+diff --git a/tests/client.rs b/tests/client.rs
+index 417e9bf2..fd14ba5c 100644
+--- a/tests/client.rs
++++ b/tests/client.rs
+@@ -1110,7 +1110,7 @@ mod dispatch_impl {
+     use super::*;
+     use std::io::{self, Read, Write};
+     use std::sync::atomic::{AtomicUsize, Ordering};
+-    use std::sync::Arc;
++    use std::gc::Gc as Arc;
+     use std::thread;
+     use std::time::Duration;
+ 

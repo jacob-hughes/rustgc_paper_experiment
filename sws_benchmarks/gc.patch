@@ -1,0 +1,222 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index e82c71c..7f1dd9e 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -841,9 +841,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+ 
+ [[package]]
+ name = "hyper"
+-version = "0.14.30"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a152ddd61dfaec7273fe8419ab357f33aee0d914c5f4efbf0d96fa749eea5ec9"
++version = "0.14.19"
+ dependencies = [
+  "bytes",
+  "futures-channel",
+@@ -856,7 +854,7 @@ dependencies = [
+  "httpdate",
+  "itoa",
+  "pin-project-lite",
+- "socket2",
++ "socket2 0.4.10",
+  "tokio",
+  "tower-service",
+  "tracing",
+@@ -1633,6 +1631,16 @@ version = "1.13.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
+ 
++[[package]]
++name = "socket2"
++version = "0.4.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9f7916fc008ca5542385b89a3d3ce689953c143e9304a9bf8beec1de48994c0d"
++dependencies = [
++ "libc",
++ "winapi",
++]
++
+ [[package]]
+ name = "socket2"
+ version = "0.5.7"
+@@ -1855,7 +1863,7 @@ dependencies = [
+  "mio",
+  "pin-project-lite",
+  "signal-hook-registry",
+- "socket2",
++ "socket2 0.5.7",
+  "tokio-macros",
+  "windows-sys 0.52.0",
+ ]
+diff --git a/Cargo.toml b/Cargo.toml
+index c4fe691..08a5843 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -38,7 +38,7 @@ doc = false
+ 
+ [features]
+ # All features enabled by default
+-default = ["compression", "http2", "directory-listing", "basic-auth", "fallback-page"]
++default = ["compression", "directory-listing", "basic-auth", "fallback-page"]
+ # Include all features (used when building SWS binaries)
+ all = ["default", "experimental"]
+ # HTTP2
+@@ -75,7 +75,7 @@ globset = { version = "0.4", features = ["serde1"] }
+ headers = "0.3"
+ http = "0.2"
+ http-serde = "1.1"
+-hyper = { version = "0.14", features = ["stream", "http1", "http2", "tcp", "server"] }
++hyper = { path = "../hyper", features = ["stream", "http1", "http2", "tcp", "server"] }
+ lazy_static = "1.5"
+ listenfd = "1.0"
+ maud = { version = "0.26", optional = true }
+diff --git a/src/handler.rs b/src/handler.rs
+index b3f19aa..3d8329b 100644
+--- a/src/handler.rs
++++ b/src/handler.rs
+@@ -7,7 +7,8 @@
+ //!
+ 
+ use hyper::{Body, Request, Response, StatusCode};
+-use std::{future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
++use std::{future::Future, net::SocketAddr, path::PathBuf};
++use std::gc::Gc;
+ 
+ #[cfg(any(
+     feature = "compression",
+@@ -169,7 +170,7 @@ impl Default for RequestHandlerOpts {
+ /// It defines the main request handler used by the Hyper service request.
+ pub struct RequestHandler {
+     /// Request handler options.
+-    pub opts: Arc<RequestHandlerOpts>,
++    pub opts: Gc<RequestHandlerOpts>,
+ }
+ 
+ impl RequestHandler {
+diff --git a/src/https_redirect.rs b/src/https_redirect.rs
+index 9431877..e072c50 100644
+--- a/src/https_redirect.rs
++++ b/src/https_redirect.rs
+@@ -8,7 +8,7 @@
+ 
+ use headers::{HeaderMapExt, Host};
+ use hyper::{header::LOCATION, Body, Request, Response, StatusCode};
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ 
+ use crate::Result;
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index 85874f8..e6d447e 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -101,6 +101,12 @@
+ #![deny(dead_code)]
+ #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+ 
++#![feature(gc)]
++
++use std::gc::GcAllocator;
++#[global_allocator]
++static A: GcAllocator = GcAllocator;
++
+ // Extern crates
+ #[macro_use]
+ extern crate anyhow;
+diff --git a/src/mem_cache/stream.rs b/src/mem_cache/stream.rs
+index e7b426e..ffc8313 100644
+--- a/src/mem_cache/stream.rs
++++ b/src/mem_cache/stream.rs
+@@ -2,7 +2,7 @@ use bytes::{BufMut, Bytes, BytesMut};
+ use futures_util::Stream;
+ use std::io::Read;
+ use std::pin::Pin;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ use std::task::{Context, Poll};
+ 
+ use crate::mem_cache::cache::{MemFile, MemFileTempOpts, CACHE_STORE};
+diff --git a/src/server.rs b/src/server.rs
+index 8df52d3..b4893b7 100644
+--- a/src/server.rs
++++ b/src/server.rs
+@@ -9,7 +9,8 @@
+ use hyper::server::Server as HyperServer;
+ use listenfd::ListenFd;
+ use std::net::{IpAddr, SocketAddr, TcpListener};
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
++// use std::gc::Gc as Arc as ActualArc;
+ use tokio::sync::{watch::Receiver, Mutex};
+ 
+ use crate::handler::{RequestHandler, RequestHandlerOpts};
+@@ -348,7 +349,7 @@ impl Server {
+ 
+         // Create a service router for Hyper
+         let router_service = RouterService::new(RequestHandler {
+-            opts: Arc::from(handler_opts),
++            opts: Arc::new(handler_opts),
+         });
+ 
+         #[cfg(windows)]
+diff --git a/src/service.rs b/src/service.rs
+index f8aeb05..5b1b7d1 100644
+--- a/src/service.rs
++++ b/src/service.rs
+@@ -11,7 +11,7 @@ use std::convert::Infallible;
+ use std::future::{ready, Future, Ready};
+ use std::net::SocketAddr;
+ use std::pin::Pin;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ use std::task::{Context, Poll};
+ 
+ use crate::{handler::RequestHandler, transport::Transport, Error};
+diff --git a/src/signals.rs b/src/signals.rs
+index bcae1bd..e4cff36 100644
+--- a/src/signals.rs
++++ b/src/signals.rs
+@@ -6,7 +6,7 @@
+ //! The module provides signals support like `SIGTERM`, `SIGINT` and `SIGQUIT`.
+ //!
+ 
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ use tokio::sync::{watch::Receiver, Mutex};
+ use tokio::time::{sleep, Duration};
+ 
+diff --git a/src/testing.rs b/src/testing.rs
+index bac712a..4c0b243 100644
+--- a/src/testing.rs
++++ b/src/testing.rs
+@@ -9,7 +9,7 @@
+ /// SWS fixtures module.
+ #[doc(hidden)]
+ pub mod fixtures {
+-    use std::{path::PathBuf, sync::Arc};
++    use std::{path::PathBuf, gc::Gc as Arc};
+ 
+     use crate::{
+         handler::{RequestHandler, RequestHandlerOpts},
+@@ -110,7 +110,7 @@ pub mod fixtures {
+         };
+ 
+         RequestHandler {
+-            opts: Arc::from(req_handler_opts),
++            opts: Arc::new(req_handler_opts),
+         }
+     }
+ }
+diff --git a/src/tls.rs b/src/tls.rs
+index b638972..2d95487 100644
+--- a/src/tls.rs
++++ b/src/tls.rs
+@@ -17,7 +17,7 @@ use std::io::{self, BufReader, Cursor, Read};
+ use std::net::SocketAddr;
+ use std::path::{Path, PathBuf};
+ use std::pin::Pin;
+-use std::sync::Arc;
++use std::gc::Gc as Arc;
+ use std::task::{Context, Poll};
+ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+ use tokio_rustls::rustls::{pki_types::PrivateKeyDer, Error as TlsError, ServerConfig};
