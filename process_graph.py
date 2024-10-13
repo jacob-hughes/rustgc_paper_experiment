@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pprint
 import csv
+from scipy.stats import t
 
 import matplotlib
 matplotlib.use('Agg')
@@ -25,6 +26,7 @@ from matplotlib.ticker import ScalarFormatter
 import matplotlib.patches as mpatches
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 results = {}
 pp = pprint.PrettyPrinter(indent=4)
@@ -38,6 +40,7 @@ def mean(l):
 def confidence_interval(l):
     Z = 2.576  # 99% interval
     return Z * (stdev(l) / math.sqrt(len(l)))
+
 
 def flatten(l):
   return [y for x in l for y in x]
@@ -54,16 +57,30 @@ class PExec:
         return f"Pexec('{self.num}', '{self.cfg}', '{self.benchmark}', '{self.iters}')"
 
 class Experiment:
-    def __init__(self, vm, name, pexecs):
-        self.vm = vm
+    def __init__(self, name, pexecs):
         self.name = name
         self.pexecs = pexecs
 
     def latex_name(self):
-        return f"\\{self.vm}{self.name}".replace("-","")
+        return f"\\{self.name}".replace("_","")
 
     def geomean(self, cfg, benchmark='all'):
         return geometric_mean(self.iters(cfg, benchmark))
+
+    def ci_geomean(self, cfg):
+        l = self.iters(cfg, 'all')
+        log = np.log(l)
+        n = len(log)
+        mean_log = np.mean(log)
+        std_log = np.std(log, ddof=1)
+        confidence = 0.99
+        degrees_of_freedom = n - 1
+        t_value = np.abs(t.ppf((1 - confidence) / 2, degrees_of_freedom))
+
+        margin_of_error = t_value * (std_log / np.sqrt(n))
+        ci_lower = np.exp(mean_log - margin_of_error)
+        ci_upper = np.exp(mean_log + margin_of_error)
+        return (ci_lower, ci_upper)
 
     def mean(self, cfg, benchmark='all'):
         l = self.iters(cfg, benchmark)
@@ -140,12 +157,8 @@ class Experiment:
 
         return stats
 
-def load_exp(exp_dir):
-    parts = exp_dir.split(os.sep)
-    exp = parts[-1]
-    vm = parts[-2]
-    print(vm)
-    print(exp)
+def load_exp(exp_name):
+    exp_dir = os.path.join(os.getcwd(), 'results', exp_name)
     rbdata = os.path.join(exp_dir, "results.data")
     pexecs = {}
     stats =  {}
@@ -184,7 +197,8 @@ def load_exp(exp_dir):
             else:
                 pexecs[(invocation, benchmark, cfg)].iters.append(time)
 
-    experiment = Experiment(vm, exp, list(pexecs.values()))
+    # print(pexecs)
+    experiment = Experiment(exp_name, list(pexecs.values()))
 
     for cfg in stats.keys():
         p = os.path.join(exp_dir, f"{cfg}.log")
@@ -233,12 +247,12 @@ def plot_bar(exp):
     formatter.set_scientific(False)
     ax.yaxis.set_major_formatter(formatter)
     plt.tight_layout()
-    plt.savefig(f"plots/{exp.vm}_{exp.name}.svg", format="svg", bbox_inches="tight")
-    print("Graph saved to '%s'" % f"{exp.vm}_{exp.name}.svg")
+    plt.savefig(f"plots/{exp.name}.svg", format="svg", bbox_inches="tight")
+    print("Graph saved to '%s'" % f"{exp.name}.svg")
 
 def make_table(exp):
     bms = exp.benchmarks()
-    with open(f"plots/{exp.vm}_{exp.name}.tex", "w") as f:
+    with open(f"plots/{exp.name}.tex", "w") as f:
             # f.write(f" & {bm}")
         for (cfg, values) in exp.gc_stats.items():
             f.write(f"{cfg} &")
@@ -273,9 +287,32 @@ def write_stats(f, exp):
     f.write(f"\\newcommand{{{exp.latex_name()}}}[{depth(stats)}]{{%\n")
     make_args(stats, 1)
     f.write(f"}}%\n")
-for arg in sys.argv[1:]:
+
+summary = False
+args = sys.argv[1:]
+if sys.argv[1] == "summary":
+    summary = True
+    args = sys.argv[2:]
+
+for arg in args:
+    print(f"Called on {arg}")
     e = load_exp(arg)
     # make_table(e)
-    plot_bar(e)
+    # plot_bar(e)
+    if summary:
+        overview = {
+            'perf_rc',
+            'perf_gc',
+        }
+
+        with open("summary.csv", "a") as f:
+            for cfg in e.cfgs():
+                if cfg in overview:
+                    (ci_l, ci_u) = e.ci_geomean(cfg)
+                    f.write(f"{e.name},{cfg}, {e.geomean(cfg)}, {ci_l}, {ci_u}\n")
+                    continue
+                ci = confidence_interval(e.iters(cfg, 'all'))
+                f.write(f"{e.name},{cfg}, {e.mean(cfg)}, {ci}, {ci}\n")
+    #
     # with open("plots/experiment_stats.tex", "a") as f:
     #         write_stats(f, e)

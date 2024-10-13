@@ -5,3 +5,5 @@ raw_data/
 venv/
 bdwgc/
 /bin/
+summary.csv
+plots/
