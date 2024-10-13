@@ -14,6 +14,12 @@ all: $(EXPERIMENTS)
 
 build: $(BIN)/regex_redux  $(BIN)/binary_trees
 
+plot:
+	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) summary binary_trees regex_redux
+
+clean-plots:
+	- rm summary.csv
+
 $(EXPERIMENTS): build
 	mkdir -p $(PWD)/results/$@
 	- $(REBENCH_EXEC) -R -D \
