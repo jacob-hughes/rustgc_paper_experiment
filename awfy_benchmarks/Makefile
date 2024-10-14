@@ -14,9 +14,10 @@ SOMRS_CFGS = $(addprefix $(BIN)/som-rs/, finalise_elide finalise_naive \
 YKSOM_CFGS = $(addprefix $(BIN)/yksom/, finalise_elide finalise_naive barriers_naive \
 	     barriers_opt barriers_none)
 
-SOMRS_EXPS = $(addprefix results/, som_rs_elision som_rs_perf som_rs_barriers)
+SOMRSBC_EXPS = $(addprefix results/, som_rs_bc_elision som_rs_bc_perf som_rs_bc_barriers)
+SOMRSAST_EXPS = $(addprefix results/, som_rs_ast_elision som_rs_ast_perf som_rs_ast_barriers)
 YKSOM_EXPS = $(addprefix results/, yksom_elision yksom_barriers)
-EXPERIMENTS = $(SOMRS_EXPS) $(YKSOM_EXPS)
+EXPERIMENTS = $(SOMRSBC_EXPS) $(SOMRSAST_EXPS) $(YKSOM_EXPS)
 
 all: bench
 
@@ -24,7 +25,9 @@ all: bench
 .PHONY: clean clean-benchmarks clean-builds
 
 plot:
-	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) summary som_rs_perf
+	# $(PYTHON_EXEC) $(REBENCH_PROCESSOR) summary som_rs_perf
+	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) elision yksom_elision som_rs_bc_elision som_rs_ast_elision
+	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) barriers yksom_barriers som_rs_bc_barriers som_rs_ast_barriers
 
 clean-plots:
 	- rm summary.csv
@@ -39,13 +42,21 @@ $(YKSOM_EXPS): build
 		-df $@/$(REBENCH_DATA) \
 		yksom.conf $(notdir $@)
 
-$(SOMRS_EXPS): build
+$(SOMRSAST_EXPS): build
 	mkdir -p $@
 	- $(REBENCH_EXEC) -R -D \
 		--invocations ${PEXECS} \
 		--iterations ${ITERS} \
 		-df $@/$(REBENCH_DATA) \
-		som-rs.conf $(notdir $@)
+		som-rs-ast.conf $(notdir $@)
+
+$(SOMRSBC_EXPS): build
+	mkdir -p $@
+	- $(REBENCH_EXEC) -R -D \
+		--invocations ${PEXECS} \
+		--iterations ${ITERS} \
+		-df $@/$(REBENCH_DATA) \
+		som-rs-bc.conf $(notdir $@)
 
 build: $(YKSOM_CFGS) $(SOMRS_CFGS)
 
@@ -72,23 +83,25 @@ $(SOMRS_CFGS): som-rs/Cargo.lock
 	else \
 		cd som-rs; \
 		git apply $(PATCH_DIR)/som-rs/use_gc.patch; \
+		echo "Applying dump stats";\
 		git apply $(PATCH_DIR)/som-rs/dump_stats.patch; \
 	fi
 	@if [ -n "$(filter $(ALLOY_CFGS), $(notdir $@))" ]; then \
 		cd som-rs && \
 		RUSTC="../../bin/alloy/$(notdir $@)/bin/rustc" \
 			cargo build \
-				--release -p som-interpreter-bc \
+				--release \
 			      	--target-dir=$@; \
 	else \
 		cd som-rs && \
 		RUSTC="../../bin/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc" \
 			cargo build \
-				--release -p som-interpreter-bc \
+				--release \
 			      	--target-dir=$@; \
 	fi
 	ln -s $(PWD)/som-rs/core-lib $@/core-lib
-	ln -s $@/release/som-interpreter-bc $@/som-rs
+	ln -s $@/release/som-interpreter-bc $@/som-rs-bc
+	ln -s $@/release/som-interpreter-ast $@/som-rs-ast
 	cd som-rs && git reset --hard
 
 som-rs/Cargo.lock:

@@ -231,6 +231,62 @@ def load_exp(exp_name):
     experiment.gc_stats = stats
     return experiment
 
+def plot_overview_bar(name, exps):
+    vm_mapper = {
+        "yksom_elision": "yksom",
+        "som_rs_bc_elision": "som-rs-bc",
+        "som_rs_ast_elision": "som-rs-ast",
+        "yksom_barriers": "yksom",
+        "som_rs_bc_barriers": "som-rs-bc",
+        "som_rs_ast_barriers": "som-rs-ast",
+    }
+    name_map = {
+        'finalise_naive' : 'Naive',
+        'finalise_elide' : 'Elision',
+        'barriers_opt' : 'opt',
+        'barriers_none' : 'none',
+        'barriers_naive' : 'naive'
+    }
+    legend ={ 
+        'barriers' : [name_map[cfg] for cfg in sorted(exps[0].cfgs())],
+        'elision' : [name_map[cfg] for cfg in sorted(exps[0].cfgs())]
+    }
+    exps = sorted(exps, key = lambda e: e.name)
+    index = [vm_mapper[e.name] for e in exps]
+    geomeans = [[e.geomean(cfg) for cfg in sorted(e.cfgs())] for e in exps]
+    print(index)
+    print(geomeans)
+    cis = [[e.ci_geomean(cfg) for cfg in sorted(e.cfgs())] for e in exps]
+
+    sns.set(style="whitegrid")
+    # plt.rc('text', usetex=False)
+    # plt.rc('font', family='sans-serif')
+    fig, ax = plt.subplots(figsize=(3.5, 3.5))
+    df = pd.DataFrame(geomeans, index=index)
+    errs = pd.DataFrame(cis, index=index)
+    plot = df.plot(kind='bar', width=0.8, ax=ax)
+    plot.margins(x=0.01)
+    ax.legend(legend[name]).remove()
+
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.set_ylabel('Wall-clock time (ms)\n(lower is better)')
+    ax.grid(linewidth=0.25)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+    ax.xaxis.set_tick_params(which='minor', size=0)
+    ax.yaxis.set_tick_params(which='minor', width=0)
+    plt.xticks(range(0, len(index)), index, rotation = 45, ha="right")
+    # ax.set_yticks(range, len(exp.benchmarks()))
+    # ax.set_ytickslabels(exp.benchmarks())
+    formatter = ScalarFormatter()
+    formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+    plt.tight_layout()
+    plt.savefig(f"plots/{name}.svg", format="svg", bbox_inches="tight")
+    print("Graph saved to '%s'" % f"plots/{name}.svg")
 
 def plot_bar(exp):
     means = [[mean(exp.iters(cfg, benchmark)) for benchmark in exp.benchmarks()] for cfg in exp.cfgs()]
@@ -239,10 +295,10 @@ def plot_bar(exp):
     sns.set(style="whitegrid")
     # plt.rc('text', usetex=False)
     # plt.rc('font', family='sans-serif')
-    fig, ax = plt.subplots(figsize=(4, 4))
+    fig, ax = plt.subplots(figsize=(8, 3))
     df = pd.DataFrame(zip(*means), index=exp.benchmarks())
-    errs = pd.DataFrame(zip(*cis), index=exp.benchmarks())
-    plot = df.plot(kind='bar', width=0.8, ax=ax, yerr=errs)
+    # errs = pd.DataFrame(zip(*cis), index=exp.benchmarks())
+    plot = df.plot(kind='bar', width=0.8, ax=ax)
     plot.margins(x=0.01)
     ax.legend(exp.cfgs()).remove()
 
@@ -305,16 +361,31 @@ def write_stats(f, exp):
     f.write(f"}}%\n")
 
 summary = False
+elision = False
+barriers = False
 args = sys.argv[1:]
 if sys.argv[1] == "summary":
     summary = True
     args = sys.argv[2:]
 
+if sys.argv[1] == "elision":
+    elision = True
+    args = sys.argv[2:]
+
+if sys.argv[1] == "barriers":
+    barriers = True
+    args = sys.argv[2:]
+
+exps = []
+
 for arg in args:
     print(f"Called on {arg}")
     e = load_exp(arg)
+    exps.append(e)
     # make_table(e)
-    # plot_bar(e)
+    plot_bar(e)
+
+
     if summary:
         overview = {
             'perf_rc',
@@ -332,3 +403,8 @@ for arg in args:
     #
     # with open("plots/experiment_stats.tex", "a") as f:
     #         write_stats(f, e)
+
+if elision:
+    plot_overview_bar('elision', exps)
+if barriers:
+    plot_overview_bar('barriers', exps)

@@ -4,7 +4,7 @@ PATCH_DIR  = $(PWD)/configs
 
 export RESULTS_DIR = results
 export REBENCH_DATA = results.data
-export PEXECS ?= 30
+export PEXECS ?= 1
 export ITERS ?= 1
 
 export PYTHON = python3
@@ -24,15 +24,12 @@ ALLOY_VERSION = master
 ALLOY_CFGS_INSTALL_DIRS= $(addprefix $(BIN)/alloy/, $(ALLOY_CFGS))
 ALLOY_BOOTSTRAP_STAGE = 1
 
-all: bench
+all: clbg awfy sws
 
 .PHONY: build
 .PHONY: clean clean-builds
 .PHONY: venv plots
 
-plot: plot-clbg plot-awfy plot-sws
-
-bench: clbg awfy sws
 
 clbg:
 	cd clbg_benchmarks && \
@@ -43,6 +40,30 @@ awfy:
 sws:
 	cd sws_benchmarks && \
 		make RUSTC="/home/jake/research/alloy/build/x86_64-unknown-linux-gnu/stage1/bin/rustc"
+
+plot: plot-clbg plot-awfy plot-sws
+
+bench: bench-awfy bench-clbg bench-sws
+
+bench-awfy:
+	cd awfy_benchmarks && make bench
+
+bench-clbg:
+	cd clbg_benchmarks && make bench
+
+bench-sws:
+	cd sws_benchmarks && make bench
+
+build: build-awfy build-clbg build-sws
+
+build-awfy:
+	cd awfy_benchmarks && make build
+
+build-clbg:
+	cd clbg_benchmarks && make build
+
+build-sws:
+	cd clbg_benchmarks && make build
 
 plot-summary:
 	$(PYTHON_EXEC) process_overview.py
