@@ -39,6 +39,8 @@ CFG_LATEX_MAP = {
     "bt_alloy": r"\ourgc",
     "rr_alloy": r"\ourgc",
     "rr_rc": r"\rc",
+    "gc": r"\ourgc",
+    "rc": r"\rc",
     "perf_rc": r"\rc",
     "bt_rc": r"\rc",
     "bt_rust_gc": r"\rustgc",

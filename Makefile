@@ -7,7 +7,6 @@ export REBENCH_DATA = results.data
 export PEXECS ?= 30
 export ITERS ?= 1
 
-export PYTHON = python3
 export VENV_DIR = $(PWD)/venv
 export PIP = $(VENV_DIR)/bin/pip
 export PYTHON_EXEC = $(VENV_DIR)/bin/python
@@ -42,18 +41,19 @@ sws:
 		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
 plot:
-	cd clbg_benchmarks && make plot
-	cat clbg_benchmarks/summary.csv >> $(PWD)/summary.csv
-	cd awfy_benchmarks && make plot
-	cat awfy_benchmarks/summary.csv >> $(PWD)/summary.csv
-	cd sws_benchmarks && make plot
-	cat sws_benchmarks/summary.csv >> $(PWD)/summary.csv
-	$(PYTHON_EXEC) process_overview.py
+	mkdir -p plots
+	cd grmtools_benchmark && make plot
+	# cat clbg_benchmarks/summary.csv >> $(PWD)/summary.csv
+	# cd awfy_benchmarks && make plot
+	# cat awfy_benchmarks/summary.csv >> $(PWD)/summary.csv
+	# cd sws_benchmarks && make plot
+	# cat sws_benchmarks/summary.csv >> $(PWD)/summary.csv
+	# $(PYTHON_EXEC) process_overview.py
 
 bench:
-	cd awfy_benchmarks && make bench
-	cd clbg_benchmarks && make bench
-	cd sws_benchmarks && make bench
+	cd grmtools_benchmark && make bench
+	# cd clbg_benchmarks && make bench
+	# cd sws_benchmarks && make bench
 
 build: $(ALLOY_CFGS_INSTALL_DIRS)
 	cd awfy_benchmarks && make build
