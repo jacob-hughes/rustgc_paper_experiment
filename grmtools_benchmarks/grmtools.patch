@@ -1,0 +1,63 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 569e2a8..d714062 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -28,7 +28,7 @@ panic = 'unwind'
+ 
+ [workspace.dependencies]
+ bincode = "1.2"
+-cactus = "1.0"
++cactus = {path = "../cactus" }
+ filetime = "0.2"
+ fnv = "1.0"
+ getopts = "0.2"
+@@ -37,7 +37,7 @@ indexmap = "2"
+ num-traits = "0.2"
+ packedvec = "1.2"
+ quote = "1.0"
+-regex = "1.3"
++regex = {path = "../regex"}
+ regex-syntax = "0.8"
+ serde = "1.0"
+ sparsevec = "0.2"
+diff --git a/lrlex/src/main.rs b/lrlex/src/main.rs
+index 4975c49..fbb2832 100644
+--- a/lrlex/src/main.rs
++++ b/lrlex/src/main.rs
+@@ -1,3 +1,4 @@
++#![feature(gc)]
+ use getopts::Options;
+ use std::{
+     env,
+@@ -12,6 +13,7 @@ use cfgrammar::{newlinecache::NewlineCache, Spanned};
+ use lrlex::{DefaultLexerTypes, LRNonStreamingLexerDef, LexerDef};
+ use lrpar::{Lexeme, Lexer};
+ 
++
+ fn usage(prog: &str, msg: &str) {
+     let path = Path::new(prog);
+     let leaf = match path.file_name() {
+diff --git a/lrpar/src/lib/mod.rs b/lrpar/src/lib/mod.rs
+index e3c0f9e..6299b73 100644
+--- a/lrpar/src/lib/mod.rs
++++ b/lrpar/src/lib/mod.rs
+@@ -9,6 +9,7 @@
+ #![allow(clippy::upper_case_acronyms)]
+ #![forbid(unsafe_code)]
+ #![deny(unreachable_pub)]
++#![feature(gc)]
+ 
+ //! `lrpar` provides a Yacc-compatible parser (where grammars can be generated at compile-time or
+ //! run-time). It can take in traditional `.y` files and convert them into an idiomatic Rust
+@@ -209,6 +210,11 @@ pub use crate::{
+     parser::{LexParseError, Node, ParseError, ParseRepair, RTParserBuilder, RecoveryKind},
+ };
+ 
++use std::gc::GcAllocator;
++
++#[global_allocator]
++static A: GcAllocator = GcAllocator;
++
+ pub use crate::parser::action_generictree;
+ /// A convenience macro for including statically compiled `.y` files. A file `src/a/b/c.y`
+ /// processed by [CTParserBuilder::grammar_in_src_dir] can then be used in a crate with

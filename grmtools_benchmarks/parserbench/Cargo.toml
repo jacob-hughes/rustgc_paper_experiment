@@ -1,0 +1,15 @@
+[package]
+name = "parserbench"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+cfgrammar = { path="../grmtools/cfgrammar" }
+lrlex = { path="../grmtools/lrlex" }
+lrpar = { path="../grmtools/lrpar" }
+
+[dependencies]
+cfgrammar = { path="../grmtools/cfgrammar" }
+lrlex = { path="../grmtools/lrlex" }
+lrpar = { path="../grmtools/lrpar" }
+walkdir = "2.3.2"

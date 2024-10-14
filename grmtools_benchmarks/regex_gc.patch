@@ -1,0 +1,269 @@
+diff --git a/regex-automata/src/lib.rs b/regex-automata/src/lib.rs
+index 62260a5..c2cf929 100644
+--- a/regex-automata/src/lib.rs
++++ b/regex-automata/src/lib.rs
+@@ -539,6 +539,8 @@ enables `alloc` and `nfa-thompson`.
+ 
+ // We are no_std.
+ #![no_std]
++#![feature(gc)]
++
+ // All APIs need docs!
+ #![deny(missing_docs)]
+ // Some intra-doc links are broken when certain features are disabled, so we
+diff --git a/regex-automata/src/meta/regex.rs b/regex-automata/src/meta/regex.rs
+index 8cfdecb..f51bd6d 100644
+--- a/regex-automata/src/meta/regex.rs
++++ b/regex-automata/src/meta/regex.rs
+@@ -3,7 +3,8 @@ use core::{
+     panic::{RefUnwindSafe, UnwindSafe},
+ };
+ 
+-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
++use alloc::{boxed::Box, sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use regex_syntax::{
+     ast,
+diff --git a/regex-automata/src/meta/strategy.rs b/regex-automata/src/meta/strategy.rs
+index 04f2ba3..b0abcb4 100644
+--- a/regex-automata/src/meta/strategy.rs
++++ b/regex-automata/src/meta/strategy.rs
+@@ -3,7 +3,8 @@ use core::{
+     panic::{RefUnwindSafe, UnwindSafe},
+ };
+ 
+-use alloc::sync::Arc;
++use alloc::sync::Arc as ArcActual;
++use std::gc::Gc as Arc;
+ 
+ use regex_syntax::hir::{literal, Hir};
+ 
+diff --git a/regex-automata/src/nfa/thompson/builder.rs b/regex-automata/src/nfa/thompson/builder.rs
+index 6b69e87..0607273 100644
+--- a/regex-automata/src/nfa/thompson/builder.rs
++++ b/regex-automata/src/nfa/thompson/builder.rs
+@@ -1,6 +1,7 @@
+ use core::mem;
+ 
+-use alloc::{sync::Arc, vec, vec::Vec};
++use alloc::{sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use crate::{
+     nfa::thompson::{
+@@ -864,7 +865,7 @@ impl Builder {
+     ///     util::primitives::StateID,
+     /// };
+     ///
+-    /// let name = Some(std::sync::Arc::from("foo"));
++    /// let name = Some(std::sync::Arc as ArcActual::from("foo"));
+     /// let mut builder = Builder::new();
+     /// builder.start_pattern()?;
+     /// // 0th capture group should always be unnamed.
+@@ -887,7 +888,7 @@ impl Builder {
+     /// distinct patterns is okay:
+     ///
+     /// ```
+-    /// use std::sync::Arc;
++    /// use std::sync::Arc as ArcActual;
+     ///
+     /// use regex_automata::{
+     ///     nfa::thompson::{pikevm::PikeVM, Builder, Transition},
+diff --git a/regex-automata/src/nfa/thompson/compiler.rs b/regex-automata/src/nfa/thompson/compiler.rs
+index ced1771..25abe4c 100644
+--- a/regex-automata/src/nfa/thompson/compiler.rs
++++ b/regex-automata/src/nfa/thompson/compiler.rs
+@@ -1,6 +1,7 @@
+ use core::{borrow::Borrow, cell::RefCell};
+ 
+-use alloc::{sync::Arc, vec, vec::Vec};
++use alloc::{sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use regex_syntax::{
+     hir::{self, Hir},
+diff --git a/regex-automata/src/nfa/thompson/nfa.rs b/regex-automata/src/nfa/thompson/nfa.rs
+index 1f57f8e..1192f4b 100644
+--- a/regex-automata/src/nfa/thompson/nfa.rs
++++ b/regex-automata/src/nfa/thompson/nfa.rs
+@@ -1,6 +1,7 @@
+ use core::{fmt, mem};
+ 
+-use alloc::{boxed::Box, format, string::String, sync::Arc, vec, vec::Vec};
++use alloc::{boxed::Box, format, string::String, sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ #[cfg(feature = "syntax")]
+ use crate::nfa::thompson::{
+diff --git a/regex-automata/src/util/captures.rs b/regex-automata/src/util/captures.rs
+index 93a0a8a..d32c85b 100644
+--- a/regex-automata/src/util/captures.rs
++++ b/regex-automata/src/util/captures.rs
+@@ -32,7 +32,8 @@ directly, but for example, if you've compiled an Thompson NFA, then you can use
+ underlying `GroupInfo`.
+ */
+ 
+-use alloc::{string::String, sync::Arc, vec, vec::Vec};
++use alloc::{string::String, sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use crate::util::{
+     interpolate,
+diff --git a/regex-automata/src/util/determinize/state.rs b/regex-automata/src/util/determinize/state.rs
+index 540d5d4..f9353ca 100644
+--- a/regex-automata/src/util/determinize/state.rs
++++ b/regex-automata/src/util/determinize/state.rs
+@@ -88,7 +88,8 @@ as long as everything in this module agrees.
+ 
+ use core::mem;
+ 
+-use alloc::{sync::Arc, vec::Vec};
++use alloc::{sync::Arc as ArcActual, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use crate::util::{
+     int::{I32, U32},
+diff --git a/regex-automata/src/util/pool.rs b/regex-automata/src/util/pool.rs
+index d90d4ec..2848fd9 100644
+--- a/regex-automata/src/util/pool.rs
++++ b/regex-automata/src/util/pool.rs
+@@ -1073,7 +1073,8 @@ mod tests {
+     #[cfg(feature = "std")]
+     #[test]
+     fn thread_owner_optimization() {
+-        use std::{cell::RefCell, sync::Arc, vec};
++        use std::{cell::RefCell, sync::Arc as ArcActual, vec};
++        use std::gc::Gc as Arc;
+ 
+         let pool: Arc<Pool<RefCell<Vec<char>>>> =
+             Arc::new(Pool::new(|| RefCell::new(vec!['a'])));
+diff --git a/regex-automata/src/util/prefilter/mod.rs b/regex-automata/src/util/prefilter/mod.rs
+index d20442a..b9cc3f1 100644
+--- a/regex-automata/src/util/prefilter/mod.rs
++++ b/regex-automata/src/util/prefilter/mod.rs
+@@ -46,7 +46,8 @@ use core::{
+ };
+ 
+ #[cfg(feature = "alloc")]
+-use alloc::sync::Arc;
++use alloc::sync::Arc as ArcActual;
++use std::gc::Gc as Arc;
+ 
+ #[cfg(feature = "syntax")]
+ use regex_syntax::hir::{literal, Hir};
+diff --git a/regex-lite/src/nfa.rs b/regex-lite/src/nfa.rs
+index 8f37a54..444d17b 100644
+--- a/regex-lite/src/nfa.rs
++++ b/regex-lite/src/nfa.rs
+@@ -1,6 +1,7 @@
+ use core::{cell::RefCell, mem::size_of};
+ 
+-use alloc::{string::String, sync::Arc, vec, vec::Vec};
++use alloc::{string::String, sync::Arc as ArcActual, vec, vec::Vec};
++use std::gc::Gc as Arc;
+ 
+ use crate::{
+     error::Error,
+diff --git a/regex-lite/src/string.rs b/regex-lite/src/string.rs
+index 5fe30ad..28b2456 100644
+--- a/regex-lite/src/string.rs
++++ b/regex-lite/src/string.rs
+@@ -1,5 +1,5 @@
+ use alloc::{
+-    borrow::Cow, boxed::Box, string::String, string::ToString, sync::Arc, vec,
++    borrow::Cow, boxed::Box, string::String, string::ToString, sync::Arc as ArcActual, vec,
+     vec::Vec,
+ };
+ 
+diff --git a/src/builders.rs b/src/builders.rs
+index c111a96..f8a9c06 100644
+--- a/src/builders.rs
++++ b/src/builders.rs
+@@ -23,11 +23,12 @@
+ 
+ use alloc::{
+     string::{String, ToString},
+-    sync::Arc,
++    sync::Arc as ArcActual,
+     vec,
+     vec::Vec,
+ };
+ 
++use std::gc::Gc as Arc;
+ use regex_automata::{
+     meta, nfa::thompson::WhichCaptures, util::syntax, MatchKind,
+ };
+diff --git a/src/lib.rs b/src/lib.rs
+index 6dbd3c2..60125a7 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1316,6 +1316,7 @@ this for literal optimizations.
+ #![deny(missing_docs)]
+ #![cfg_attr(feature = "pattern", feature(pattern))]
+ #![warn(missing_debug_implementations)]
++#![feature(gc)]
+ 
+ #[cfg(doctest)]
+ doc_comment::doctest!("../README.md");
+diff --git a/src/regex/bytes.rs b/src/regex/bytes.rs
+index 39af6e7..0aae349 100644
+--- a/src/regex/bytes.rs
++++ b/src/regex/bytes.rs
+@@ -1,5 +1,6 @@
+-use alloc::{borrow::Cow, string::String, sync::Arc, vec::Vec};
++use alloc::{borrow::Cow, string::String, sync::Arc as ArcActual, vec::Vec};
+ 
++use std::gc::Gc as Arc;
+ use regex_automata::{meta, util::captures, Input, PatternID};
+ 
+ use crate::{bytes::RegexBuilder, error::Error};
+diff --git a/src/regex/string.rs b/src/regex/string.rs
+index fab178a..7599b34 100644
+--- a/src/regex/string.rs
++++ b/src/regex/string.rs
+@@ -1,4 +1,5 @@
+-use alloc::{borrow::Cow, string::String, sync::Arc};
++use alloc::{borrow::Cow, string::String, sync::Arc as ArcActual};
++use std::gc::Gc as Arc;
+ 
+ use regex_automata::{meta, util::captures, Input, PatternID};
+ 
+diff --git a/src/regexset/bytes.rs b/src/regexset/bytes.rs
+index 46f02fb..b9d5c0d 100644
+--- a/src/regexset/bytes.rs
++++ b/src/regexset/bytes.rs
+@@ -1,4 +1,5 @@
+ use alloc::string::String;
++use std::gc::Gc as Arc;
+ 
+ use regex_automata::{meta, Input, PatternID, PatternSet, PatternSetIter};
+ 
+@@ -135,7 +136,7 @@ use crate::{bytes::RegexSetBuilder, Error};
+ #[derive(Clone)]
+ pub struct RegexSet {
+     pub(crate) meta: meta::Regex,
+-    pub(crate) patterns: alloc::sync::Arc<[String]>,
++    pub(crate) patterns: Arc<[String]>,
+ }
+ 
+ impl RegexSet {
+diff --git a/src/regexset/string.rs b/src/regexset/string.rs
+index 535a670..d296205 100644
+--- a/src/regexset/string.rs
++++ b/src/regexset/string.rs
+@@ -1,4 +1,5 @@
+ use alloc::string::String;
++use std::gc::Gc as Arc;
+ 
+ use regex_automata::{meta, Input, PatternID, PatternSet, PatternSetIter};
+ 
+@@ -131,7 +132,7 @@ use crate::{Error, RegexSetBuilder};
+ #[derive(Clone)]
+ pub struct RegexSet {
+     pub(crate) meta: meta::Regex,
+-    pub(crate) patterns: alloc::sync::Arc<[String]>,
++    pub(crate) patterns: Arc<[String]>,
+ }
+ 
+ impl RegexSet {
