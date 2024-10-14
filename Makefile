@@ -42,7 +42,7 @@ sws:
 
 plot:
 	mkdir -p plots
-	cd grmtools_benchmark && make plot
+	cd grmtools_benchmarks && make plot
 	# cat clbg_benchmarks/summary.csv >> $(PWD)/summary.csv
 	# cd awfy_benchmarks && make plot
 	# cat awfy_benchmarks/summary.csv >> $(PWD)/summary.csv
@@ -51,15 +51,18 @@ plot:
 	# $(PYTHON_EXEC) process_overview.py
 
 bench:
-	cd grmtools_benchmark && make bench
-	# cd clbg_benchmarks && make bench
-	# cd sws_benchmarks && make bench
+	cd grmtools_benchmarks && make bench
+	cd clbg_benchmarks && make bench
+	cd awfy_benchmarks && make bench
+	cd sws_benchmarks && make bench
 
 build: $(ALLOY_CFGS_INSTALL_DIRS)
 	cd awfy_benchmarks && make build
 	cd clbg_benchmarks && \
 		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 	cd sws_benchmarks && \
+		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
+	cd grmtools_benchmarks && \
 		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
 clean-plots:
