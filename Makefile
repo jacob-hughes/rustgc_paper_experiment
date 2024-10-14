@@ -27,94 +27,64 @@ ALLOY_BOOTSTRAP_STAGE = 1
 all: clbg awfy sws
 
 .PHONY: build
-.PHONY: clean clean-builds
+.PHONY: clean clean-builds check-clean
 .PHONY: venv plots
-
 
 clbg:
 	cd clbg_benchmarks && \
-		make RUSTC="/home/jake/research/alloy/build/x86_64-unknown-linux-gnu/stage1/bin/rustc"
+		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
+
 awfy:
 	cd awfy_benchmarks && make
 
 sws:
 	cd sws_benchmarks && \
-		make RUSTC="/home/jake/research/alloy/build/x86_64-unknown-linux-gnu/stage1/bin/rustc"
+		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
-plot: plot-clbg plot-awfy plot-sws
-
-bench: bench-awfy bench-clbg bench-sws
-
-bench-awfy:
-	cd awfy_benchmarks && make bench
-
-bench-clbg:
-	cd clbg_benchmarks && make bench
-
-bench-sws:
-	cd sws_benchmarks && make bench
-
-build: build-awfy build-clbg build-sws
-
-build-awfy:
-	cd awfy_benchmarks && make build
-
-build-clbg:
-	cd clbg_benchmarks && make build
-
-build-sws:
-	cd clbg_benchmarks && make build
-
-plot-summary:
-	$(PYTHON_EXEC) process_overview.py
-
-clean-plots: clean-clbg-plots clean-awfy-plots clean-sws-plots
-	rm summary.csv
-
-clean-clbg-plots:
-	cd clbg_benchmarks && make clean-plots
-
-clean-awfy-plots:
-	cd awfy_benchmarks && make clean-plots
-
-clean-sws-plots:
-	cd sws_benchmarks && make clean-plots
-
-plot-clbg:
+plot:
 	cd clbg_benchmarks && make plot
 	cat clbg_benchmarks/summary.csv >> $(PWD)/summary.csv
-
-plot-awfy:
 	cd awfy_benchmarks && make plot
 	cat awfy_benchmarks/summary.csv >> $(PWD)/summary.csv
-
-plot-sws:
 	cd sws_benchmarks && make plot
 	cat sws_benchmarks/summary.csv >> $(PWD)/summary.csv
+	$(PYTHON_EXEC) process_overview.py
 
-clean-benchmarks: clean-clbg-benchmarks clean-awfy-benchmarks clean-sws-benchmarks
+bench:
+	cd awfy_benchmarks && make bench
+	cd clbg_benchmarks && make bench
+	cd sws_benchmarks && make bench
 
-clean-clbg-benchmarks:
+build:
+	cd awfy_benchmarks && make build
+	cd clbg_benchmarks && \
+		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
+	cd sws_benchmarks && \
+		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
+
+clean-plots:
+	cd clbg_benchmarks && make clean-plots
+	cd awfy_benchmarks && make clean-plots
+	cd sws_benchmarks && make clean-plots
+	rm summary.csv
+
+clean-benchmarks:
 	cd clbg_benchmarks && make clean-benchmarks
-
-clean-awfy-benchmarks:
 	cd awfy_benchmarks && make clean-benchmarks
-
-clean-sws-benchmarks:
 	cd sws_benchmarks && make clean-benchmarks
 
-clean-builds: clean-clbg-builds clean-awfy-builds clean-sws-builds
-
-clean-clbg-builds:
+clean-builds:
 	cd clbg_benchmarks && make clean-builds
-
-clean-awfy-builds:
 	cd awfy_benchmarks && make clean-builds
-
-clean-sws-builds:
 	cd sws_benchmarks && make clean-builds
 
 build-alloy: $(ALLOY_CFGS_INSTALL_DIRS)
+
+clean: clean-confirm clean-plots clean-benchmarks clean-builds
+	@echo "Clean"
+
+clean-confirm:
+	@( read -p "Are you sure? [y/N]: " sure && case "$$sure" in [yY]) true;; *) false;; esac )
 
 $(ALLOY_CFGS_INSTALL_DIRS):
 	cd $(ALLOY_SRC_DIR) && git diff-index --quiet HEAD --
