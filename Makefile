@@ -30,14 +30,14 @@ all: clbg awfy sws
 .PHONY: clean clean-builds check-clean
 .PHONY: venv plots
 
-clbg:
+clbg: build-alloy
 	cd clbg_benchmarks && \
 		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
-awfy:
+awfy: build-alloy
 	cd awfy_benchmarks && make
 
-sws:
+sws: build-alloy
 	cd sws_benchmarks && \
 		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
@@ -55,7 +55,7 @@ bench:
 	cd clbg_benchmarks && make bench
 	cd sws_benchmarks && make bench
 
-build:
+build: $(ALLOY_CFGS_INSTALL_DIRS)
 	cd awfy_benchmarks && make build
 	cd clbg_benchmarks && \
 		make build RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
@@ -66,7 +66,7 @@ clean-plots:
 	cd clbg_benchmarks && make clean-plots
 	cd awfy_benchmarks && make clean-plots
 	cd sws_benchmarks && make clean-plots
-	rm summary.csv
+	- rm summary.csv
 
 clean-benchmarks:
 	cd clbg_benchmarks && make clean-benchmarks
@@ -81,6 +81,7 @@ clean-builds:
 build-alloy: $(ALLOY_CFGS_INSTALL_DIRS)
 
 clean: clean-confirm clean-plots clean-benchmarks clean-builds
+	rm -rf $(BIN)
 	@echo "Clean"
 
 clean-confirm:
