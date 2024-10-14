@@ -4,7 +4,7 @@ PATCH_DIR  = $(PWD)/configs
 
 export RESULTS_DIR = results
 export REBENCH_DATA = results.data
-export PEXECS ?= 1
+export PEXECS ?= 30
 export ITERS ?= 1
 
 export PYTHON = python3
@@ -24,20 +24,20 @@ ALLOY_VERSION = master
 ALLOY_CFGS_INSTALL_DIRS= $(addprefix $(BIN)/alloy/, $(ALLOY_CFGS))
 ALLOY_BOOTSTRAP_STAGE = 1
 
-all: clbg awfy sws
+all: build-alloy clbg awfy sws
 
 .PHONY: build
 .PHONY: clean clean-builds check-clean
 .PHONY: venv plots
 
-clbg: build-alloy
+clbg:
 	cd clbg_benchmarks && \
 		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
-awfy: build-alloy
+awfy:
 	cd awfy_benchmarks && make
 
-sws: build-alloy
+sws:
 	cd sws_benchmarks && \
 		make RUSTC="$(BIN)/alloy/$(ALLOY_DEFAULT_CFG)/bin/rustc"
 
@@ -78,7 +78,7 @@ clean-builds:
 	cd awfy_benchmarks && make clean-builds
 	cd sws_benchmarks && make clean-builds
 
-build-alloy: $(ALLOY_CFGS_INSTALL_DIRS)
+build-alloy: venv $(ALLOY_SRC_DIR) $(ALLOY_CFGS_INSTALL_DIRS)
 
 clean: clean-confirm clean-plots clean-benchmarks clean-builds
 	rm -rf $(BIN)
