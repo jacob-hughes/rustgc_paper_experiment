@@ -1,17 +1,3 @@
-diff --git a/som-core/src/ast.rs b/som-core/src/ast.rs
-index c44aafc..a2b785b 100644
---- a/som-core/src/ast.rs
-+++ b/som-core/src/ast.rs
-@@ -110,6 +110,9 @@ pub struct Body {
-     pub full_stopped: bool,
- }
- 
-+unsafe impl std::gc::FinalizerOptional for Body {}
-+unsafe impl std::gc::FinalizerOptional for Expression {}
-+
- /// Represents an expression.
- ///
- /// Exemple:
 diff --git a/som-core/src/lib.rs b/som-core/src/lib.rs
 index f3ef8f8..36f2ab8 100644
 --- a/som-core/src/lib.rs
@@ -300,7 +286,7 @@ index d55aa22..ee69cda 100644
              frame: frame.clone(),
          })))
 diff --git a/som-interpreter-ast/src/frame.rs b/som-interpreter-ast/src/frame.rs
-index d154418..b1868af 100644
+index d154418..5d7f05e 100644
 --- a/som-interpreter-ast/src/frame.rs
 +++ b/som-interpreter-ast/src/frame.rs
 @@ -1,5 +1,5 @@
@@ -319,16 +305,6 @@ index d154418..b1868af 100644
      },
      /// A frame created from a method invocation.
      Method {
-@@ -35,6 +35,9 @@ pub struct Frame {
-     pub bindings: HashMap<String, Value>,
- }
- 
-+unsafe impl std::gc::FinalizerOptional for Frame {}
-+unsafe impl core::marker::FinalizerSafe for Frame {}
-+
- impl Frame {
-     /// Construct a new empty frame from its kind.
-     pub fn from_kind(kind: FrameKind) -> Self {
 diff --git a/som-interpreter-ast/src/hashcode.rs b/som-interpreter-ast/src/hashcode.rs
 index f3fa5bf..3af8dfd 100644
 --- a/som-interpreter-ast/src/hashcode.rs
@@ -342,20 +318,6 @@ index f3fa5bf..3af8dfd 100644
              holder.borrow().hash(hasher);
          } else {
              hasher.write(b"??");
-diff --git a/som-interpreter-ast/src/instance.rs b/som-interpreter-ast/src/instance.rs
-index aa4d3bc..2081244 100644
---- a/som-interpreter-ast/src/instance.rs
-+++ b/som-interpreter-ast/src/instance.rs
-@@ -14,6 +14,9 @@ pub struct Instance {
-     pub locals: HashMap<String, Value>,
- }
- 
-+unsafe impl std::gc::FinalizerOptional for Instance {}
-+unsafe impl core::marker::FinalizerSafe for Instance {}
-+
- impl Instance {
-     /// Construct an instance for a given class.
-     pub fn from_class(class: SOMRef<Class>) -> Self {
 diff --git a/som-interpreter-ast/src/invokable.rs b/som-interpreter-ast/src/invokable.rs
 index 0538ade..4411803 100644
 --- a/som-interpreter-ast/src/invokable.rs
@@ -1232,14 +1194,13 @@ index 212fc21..e84bb2b 100644
          } else {
              hasher.write(b"??");
 diff --git a/som-interpreter-bc/src/instance.rs b/som-interpreter-bc/src/instance.rs
-index a8f61ee..e73656d 100644
+index a8f61ee..13da783 100644
 --- a/som-interpreter-bc/src/instance.rs
 +++ b/som-interpreter-bc/src/instance.rs
-@@ -13,6 +13,9 @@ pub struct Instance {
+@@ -13,6 +13,8 @@ pub struct Instance {
      pub locals: Vec<Value>,
  }
  
-+unsafe impl std::gc::FinalizerOptional for Instance {}
 +unsafe impl core::marker::FinalizerSafe for Instance {}
 +
  impl Instance {

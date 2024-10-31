@@ -1,0 +1,53 @@
+diff --git a/src/main.rs b/src/main.rs
+index ca8345a..f845a0c 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -42,6 +42,7 @@ fn error(msg: &str) -> ! {
+ fn main() {
+     let args = env::args().collect::<Vec<_>>();
+     let prog = &args[0];
++    let benchmark = &args[4];
+     let matches = Options::new()
+         .reqopt(
+             "",
+@@ -109,7 +110,7 @@ fn main() {
+     );
+     let args = NormalArray::from_vec(args_vec);
+     match vm.top_level_send(system, "initialize:", vec![args]) {
+-        Ok(_) => (),
++        Ok(_) => dump_stats(benchmark),
+         Err(e) => {
+             let code = if let box VMError {
+                 kind: VMErrorKind::Exit(code),
+@@ -123,7 +124,31 @@ fn main() {
+             if code != 0 {
+                 e.console_print(&vm);
+             }
++            dump_stats(benchmark);
+             process::exit(code);
+         }
+     }
+ }
++
++fn dump_stats(benchmark: &String) {
++    if std::env::var("DUMP_GC_STATS").is_err() {
++       return;
++    }
++
++    use std::io::Write;
++    let mut file = std::fs::OpenOptions::new()
++        .write(true)
++        .create(true)
++        .append(true)
++        .open(std::env::var("DUMP_GC_STATS").unwrap()).unwrap();
++
++    let gcstats = std::gc::stats();
++    write!(file, "{}, {}, {}, {}, {}, {}\n",
++        benchmark,
++        gcstats.finalizers_registered,
++        gcstats.finalizers_completed,
++        gcstats.allocated_gc,
++        gcstats.allocated_normal,
++        gcstats.num_gcs
++    ).unwrap();
++}
