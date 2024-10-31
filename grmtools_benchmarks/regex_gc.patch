@@ -26,7 +26,7 @@ index 8cfdecb..f51bd6d 100644
  use regex_syntax::{
      ast,
 diff --git a/regex-automata/src/meta/strategy.rs b/regex-automata/src/meta/strategy.rs
-index 04f2ba3..b0abcb4 100644
+index 04f2ba3..9d2d79f 100644
 --- a/regex-automata/src/meta/strategy.rs
 +++ b/regex-automata/src/meta/strategy.rs
 @@ -3,7 +3,8 @@ use core::{
@@ -39,6 +39,15 @@ index 04f2ba3..b0abcb4 100644
  
  use regex_syntax::hir::{literal, Hir};
  
+@@ -191,6 +192,8 @@ struct Pre<P> {
+     group_info: GroupInfo,
+ }
+ 
++unsafe impl<P> FinalizerSafe for Pre<P> {}
++
+ impl<P: PrefilterI> Pre<P> {
+     fn new(pre: P) -> Arc<dyn Strategy> {
+         // The only thing we support when we use prefilters directly as a
 diff --git a/regex-automata/src/nfa/thompson/builder.rs b/regex-automata/src/nfa/thompson/builder.rs
 index 6b69e87..0607273 100644
 --- a/regex-automata/src/nfa/thompson/builder.rs
@@ -97,7 +106,7 @@ index 1f57f8e..1192f4b 100644
  #[cfg(feature = "syntax")]
  use crate::nfa::thompson::{
 diff --git a/regex-automata/src/util/captures.rs b/regex-automata/src/util/captures.rs
-index 93a0a8a..d32c85b 100644
+index 93a0a8a..f9677e2 100644
 --- a/regex-automata/src/util/captures.rs
 +++ b/regex-automata/src/util/captures.rs
 @@ -32,7 +32,8 @@ directly, but for example, if you've compiled an Thompson NFA, then you can use
@@ -110,6 +119,34 @@ index 93a0a8a..d32c85b 100644
  
  use crate::util::{
      interpolate,
+@@ -1450,6 +1451,8 @@ impl<'a> core::iter::FusedIterator for CapturesPatternIter<'a> {}
+ #[derive(Clone, Debug, Default)]
+ pub struct GroupInfo(Arc<GroupInfoInner>);
+ 
++unsafe impl FinalizerSafe for GroupInfo {}
++
+ impl GroupInfo {
+     /// Creates a new group info from a sequence of patterns, where each
+     /// sequence of patterns yields a sequence of possible group names. The
+@@ -1606,7 +1609,8 @@ impl GroupInfo {
+             }
+         }
+         group_info.fixup_slot_ranges()?;
+-        Ok(GroupInfo(Arc::new(group_info)))
++        let gc = unsafe { Arc::from_raw(&**Arc::new(std::gc::FinalizeUnchecked::new(group_info)))};
++        Ok(GroupInfo(unsafe {gc}))
+     }
+ 
+     /// This creates an empty `GroupInfo`.
+@@ -2335,6 +2339,8 @@ pub struct GroupInfoError {
+     kind: GroupInfoErrorKind,
+ }
+ 
++unsafe impl FinalizerSafe  for GroupInfoError {}
++///
+ /// The kind of error that occurs when building a `GroupInfo` fails.
+ ///
+ /// We keep this un-exported because it's not clear how useful it is to
 diff --git a/regex-automata/src/util/determinize/state.rs b/regex-automata/src/util/determinize/state.rs
 index 540d5d4..f9353ca 100644
 --- a/regex-automata/src/util/determinize/state.rs
@@ -139,7 +176,7 @@ index d90d4ec..2848fd9 100644
          let pool: Arc<Pool<RefCell<Vec<char>>>> =
              Arc::new(Pool::new(|| RefCell::new(vec!['a'])));
 diff --git a/regex-automata/src/util/prefilter/mod.rs b/regex-automata/src/util/prefilter/mod.rs
-index d20442a..b9cc3f1 100644
+index d20442a..b6c9bd8 100644
 --- a/regex-automata/src/util/prefilter/mod.rs
 +++ b/regex-automata/src/util/prefilter/mod.rs
 @@ -46,7 +46,8 @@ use core::{
@@ -152,6 +189,24 @@ index d20442a..b9cc3f1 100644
  
  #[cfg(feature = "syntax")]
  use regex_syntax::hir::{literal, Hir};
+@@ -150,6 +151,8 @@ pub struct Prefilter {
+     max_needle_len: usize,
+ }
+ 
++unsafe impl FinalizerSafe for Prefilter {}
++
+ impl Prefilter {
+     /// Create a new prefilter from a sequence of needles and a corresponding
+     /// match semantics.
+@@ -553,6 +556,8 @@ pub(crate) enum Choice {
+     AhoCorasick(AhoCorasick),
+ }
+ 
++unsafe impl FinalizerSafe for Choice {}
++
+ impl Choice {
+     /// Select what is believed to be the best prefilter algorithm for the
+     /// match semantics and sequence of needles given.
 diff --git a/regex-lite/src/nfa.rs b/regex-lite/src/nfa.rs
 index 8f37a54..444d17b 100644
 --- a/regex-lite/src/nfa.rs
@@ -195,7 +250,7 @@ index c111a96..f8a9c06 100644
      meta, nfa::thompson::WhichCaptures, util::syntax, MatchKind,
  };
 diff --git a/src/lib.rs b/src/lib.rs
-index 6dbd3c2..60125a7 100644
+index 6dbd3c2..1956053 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -1316,6 +1316,7 @@ this for literal optimizations.

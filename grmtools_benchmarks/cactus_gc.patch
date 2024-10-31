@@ -20,19 +20,10 @@ index 8ac7629..0c43f4c 100644
  mod rc_cactus;
  
 diff --git a/src/raw_cactus.rs b/src/raw_cactus.rs
-index 55fe1e4..7be0c36 100644
+index 55fe1e4..c18d20f 100644
 --- a/src/raw_cactus.rs
 +++ b/src/raw_cactus.rs
-@@ -8,6 +8,8 @@ pub struct Cactus<T> {
-     node: Option<RefCnt<Node<T>>>,
- }
- 
-+impl<T> std::gc::ReferenceFree for Node<T> {}
-+
- #[derive(Clone)]
- struct Node<T> {
-     val: T,
-@@ -146,10 +148,19 @@ impl<T> Cactus<T> {
+@@ -146,9 +146,14 @@ impl<T> Cactus<T> {
      pub fn try_unwrap(self) -> Result<T, Cactus<T>> {
          match self.node {
              None => Err(Cactus { node: None }),
@@ -48,13 +39,8 @@ index 55fe1e4..7be0c36 100644
 +
 +                }
              },
-+            // Some(x) => match *x {
-+            //     Ok(n) => Ok(n.val),
-+            //     Err(rc) => Err(Cactus { node: Some(rc) }),
-+            // },
          }
      }
- }
 diff --git a/src/rc_cactus.rs b/src/rc_cactus.rs
 index ff993c7..90ea120 100644
 --- a/src/rc_cactus.rs
