@@ -27,12 +27,13 @@ CONNECTIONS ?= 100
 DURATION ?= 3s
 WRK = $(PWD)/wrk/wrk
 
-make all: build bench plot
+make all: venv build bench plot
 
 .PHONY: $(PERF) $(BARRIERS) $(ELISION)
 .PHONY: bench bench-perf bench-barriers bench-elision
 .PHONY: build build-perf build-barriers build-elision
 .PHONY: plot plot-setup plot-perf plot-barriers plot-elision
+.PHONY: venv
 
 bench: bench-perf bench-barriers bench-elision
 
