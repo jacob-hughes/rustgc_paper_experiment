@@ -1,4 +1,5 @@
 #![allow(clippy::unnecessary_wraps)]
+#![feature(gc)]
 
 use std::io::{self, BufRead, Write};
 use std::{fs,env, path::{Path, PathBuf}, process};
@@ -44,5 +45,27 @@ fn main() {
         let (res, errs) = java_y::parse(&lexer);
         println!("Parsed {}/{}", i, files.len())
     }
+
+    if std::env::var("DUMP_GC_STATS").is_err() {
+       return;
+    }
+
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(std::env::var("DUMP_GC_STATS").unwrap()).unwrap();
+
+    let gcstats = std::gc::stats();
+    write!(file, "{}, {}, {}, {}, {}, {}\n",
+        "grmtools",
+        gcstats.finalizers_registered,
+        gcstats.finalizers_completed,
+        gcstats.allocated_gc,
+        gcstats.allocated_normal,
+        gcstats.num_gcs
+    ).unwrap();
+
 }
 

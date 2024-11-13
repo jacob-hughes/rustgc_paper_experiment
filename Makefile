@@ -37,28 +37,34 @@ plot: plot-perf plot-barriers plot-elision
 plot-perf:
 	cd sws_benchmarks && make plot-perf
 	cd awfy_benchmarks && make plot-perf
+	cd grmtools_benchmarks && make plot-perf
 
 plot-barriers:
 	cd sws_benchmarks && make plot-barriers
 	cd awfy_benchmarks && make plot-barriers
+	cd grmtools_benchmarks && make plot-barriers
 
 plot-elision:
 	cd sws_benchmarks && make plot-elision
 	cd awfy_benchmarks && make plot-elision
+	cd grmtools_benchmarks && make plot-elision
 
 bench: bench-perf bench-barriers bench-elision
 
 bench-perf:
 	cd sws_benchmarks && make bench-perf
 	cd awfy_benchmarks && make bench-perf
+	cd grmtools_benchmarks && make bench-perf
 
 bench-barriers:
 	cd sws_benchmarks && make bench-barriers
 	cd awfy_benchmarks && make bench-barriers
+	cd grmtools_benchmarks && make bench-barriers
 
 bench-elision:
 	cd sws_benchmarks && make bench-elision
 	cd awfy_benchmarks && make bench-elision
+	cd grmtools_benchmarks && make bench-elision
 
 build: build-alloy build-benchmarks
 
@@ -67,14 +73,17 @@ build-benchmarks: build-perf build-barriers build-elision
 build-perf:
 	cd sws_benchmarks && make build-perf
 	cd awfy_benchmarks && make build-perf
+	cd grmtools_benchmarks && make build-perf
 
 build-barriers:
 	cd sws_benchmarks && make build-barriers
 	cd awfy_benchmarks && make build-barriers
+	cd grmtools_benchmarks && make build-barriers
 
 build-elision:
 	cd sws_benchmarks && make build-elision
 	cd awfy_benchmarks && make build-elision
+	cd grmtools_benchmarks && make build-elision
 
 build-alloy: $(addprefix $(BIN)/alloy/, $(ALLOY_CFGS)) $(ALLOY_SRC_DIR)
 
@@ -112,14 +121,17 @@ clean-confirm:
 clean-plots:
 	cd sws_benchmarks && make clean-plots
 	cd awfy_benchmarks && make clean-plots
+	cd grmtools_benchmarks && make clean-plots
 
 clean-benchmarks: clean-confirm
 	cd sws_benchmarks && make clean-benchmarks
 	cd awfy_benchmarks && make clean-benchmarks
+	cd grmtools_benchmarks && make clean-benchmarks
 
 clean-builds: clean-confirm
 	cd sws_benchmarks && make clean-builds
 	cd awfy_benchmarks && make clean-builds
+	cd grmtools_benchmarks && make clean-builds
 
 clean-alloy: clean-confirm
 	rm -rf $(BIN)
