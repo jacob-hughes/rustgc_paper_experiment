@@ -12,14 +12,12 @@ def monitor_rss(binary, args, output_file, interval):
 
     with open(output_file, "w", newline="") as csvfile:
         csvwriter = csv.writer(csvfile)
-        csvwriter.writerow(["Timestamp (s)", "RSS (MB)"])
+        csvwriter.writerow(["time", "mem"])
         start_time = time.time()
         try:
             while process.poll() is None:
                 try:
-                    rss = (
-                        psutil.Process(pid).memory_info().rss / 1024 / 1024
-                    )  # RSS in MB
+                    rss = psutil.Process(pid).memory_info().rss
                     timestamp = time.time() - start_time
                     csvwriter.writerow([f"{timestamp:.2f}", f"{rss:.2f}"])
                     csvfile.flush()
