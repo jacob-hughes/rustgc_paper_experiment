@@ -1,59 +1,55 @@
 PWD != pwd
-BIN = $(PWD)/bin
-PATCHES  = $(PWD)/patches
 
-# VENV
-PYTHON = python3
-PYTHON_EXEC = $(VENV_DIR)/bin/python
-VENV_DIR = $(PWD)/venv
-PIP = $(VENV_DIR)/bin/pip
-
-# SOURCES
-EXPERIMENTS = java_parse
-
-REGEX_REPO = https://github.com/rust-lang/regex
-REGEX_VERSION = bcbe40342628b15ab2543d386c745f7f0811b791
+GRMTOOLS_SRC = $(PWD)/grmtools
 GRMTOOLS_REPO = https://github.com/softdevteam/grmtools
 GRMTOOLS_VERSION = a0972be0777e599a3dbca710fb0a595c39560b69
+
+CACTUS_SRC = $(PWD)/cactus
 CACTUS_REPO = https://github.com/softdevteam/cactus
 CACTUS_VERSION = 8d34c207e1479cecf0b9b2f7beb1a0c22c8949ad
 
-REBENCH_DATA = rebench.data
+REGEX_SRC = $(PWD)/regex
+REGEX_REPO = https://github.com/rust-lang/regex
+REGEX_VERSION = bcbe40342628b15ab2543d386c745f7f0811b791
 
-.PHONY: bench bench-perf bench-barriers bench-elision
-.PHONY: build build-perf build-barriers build-elision
-.PHONY: plot plot-setup plot-perf plot-barriers plot-elision
-.PHONY: venv
+HADOOP_SRC = $(PWD)/hadoop
+ECLIPSE_SRC = $(PWD)/eclipse
+SPRING_SRC = $(PWD)/spring
+JENKINS_SRC = $(PWD)/jenkins
+
+HADOOP_REPO = https://github.com/apache/hadoop
+ECLIPSE_REPO = https://github.com/eclipse-platform/eclipse.platform
+SPRING_REPO = https://github.com/spring-projects/spring-framework
+JENKINS_REPO = https://github.com/jenkinsci/jenkins
+
+JAVA_SRCS = $(HADOOP_SRC) $(ECLIPSE_SRC) $(SPRING_SRC) $(JENKINS_SRC)
+BUILD_SRCS = $(GRMTOOLS_SRC) $(CACTUS_SRC) $(REGEX_SRC)
+
+GCVS_CFGS = gcvs/gc gcvs/rc
+GCVS_CFGS := $(addsuffix /perf, $(GCVS_CFGS)) $(addsuffix /mem, $(GCVS_CFGS))
+
+PATCH = $(PWD)/patches
+
+BINS = java_parse
+RESULTS = $(foreach e,$(EXPERIMENTS),$(foreach bin,$(BINS),$(e)/$(bin)))
+RESULTS := $(addprefix $(RESULTS_DIR)/, $(addsuffix /perf.csv, $(RESULTS)) $(addsuffix /mem.csv, $(RESULTS)))
+PLOTS = $(dir $(patsubst $(RESULTS_DIR)/%.csv, $(PLOTS_DIR)/%, $(RESULTS)))
+
+.PHONY: all build bench clean
 
 all: venv build bench plot
 
 bench: bench-perf bench-barriers bench-elision
 
-bench-perf: source_files
-	mkdir -p $(PWD)/results/perf
-	- $(REBENCH_EXEC) -R -D \
-		--invocations ${PEXECS} \
-		--iterations ${ITERS} \
-		-df results/perf/rebench.data \
-		grmtools.conf perf
+define patch_repo
+	cd $1 && git reset --hard
+	$(eval P := $(wildcard $(PATCH)/$(notdir $1).$(subst /,.,$(dir $2))diff))
+	$(if $(P),\
+		cd $1 && git apply $(P),)
+endef
 
-bench-barriers: source_files
-	mkdir -p $(PWD)/results/barriers
-	- $(REBENCH_EXEC) -R -D \
-		--invocations ${PEXECS} \
-		--iterations ${ITERS} \
-		-df results/barriers/rebench.data \
-		grmtools.conf barriers
-
-bench-elision: source_files
-	mkdir -p $(PWD)/results/elision
-	- $(REBENCH_EXEC) -R -D \
-		--invocations ${PEXECS} \
-		--iterations ${ITERS} \
-		-df results/elision/rebench.data \
-		grmtools.conf elision
-
-build: build-perf build-barriers build-elision
+build: srcs $(GCVS_CFGS)
+	@echo "hello"
 
 build-perf: grmtools cactus regex
 	cd $(PWD)/cactus && git reset --hard
@@ -99,6 +95,9 @@ build-elision: grmtools cactus regex
 	cd $(PWD)/cactus && git reset --hard
 	cd $(PWD)/regex && git reset --hard
 
+$(GCVS_CFGS):
+	$(call patch_repo,$(CACTUS_SRC),$@)
+
 plot:
 	mkdir -p plots
 	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) summary grmtools
@@ -116,47 +115,50 @@ cactus:
 	cd cactus && git checkout $(CACTUS_VERSION)
 
 
-source_files: hadoop eclipse jenkins spring
+srcs: $(JAVA_SRCS) $(BUILD_SRCS)
 
-hadoop:
-	git clone https://github.com/apache/hadoop --depth 1
+$(HADOOP_SRC):
+	git clone $(HADOOP_REPO) $@ --depth 1
 
-eclipse:
-	git clone https://github.com/eclipse-platform/eclipse.platform eclipse --depth 1
-spring:
-	git clone https://github.com/spring-projects/spring-framework --depth 1 spring
+$(ECLIPSE_SRC):
+	git clone $(ECLIPSE_REPO) $@ --depth 1
 
-jenkins:
-	git clone https://github.com/jenkinsci/jenkins jenkins --depth 1
+$(SPRING_SRC):
+	git clone $(SPRING_REPO) $@ --depth 1
 
-clean-benchmarks:
-	rm -rf results
+$(JENKINS_SRC):
+	git clone $(JENKINS_REPO) $@ --depth 1
 
-clean-builds:
-	rm -rf $(PWD)/bin
-	rm -rf $(PWD)/cactus
-	rm -rf $(PWD)/grmtools
-	rm -rf $(PWD)/regex
-	rm -rf $(PWD)/arc
-	rm -rf $(PWD)/gc
-	rm -rf $(PWD)/barriers_naive
-	rm -rf $(PWD)/barriers_none
-	rm -rf $(PWD)/barriers_opt
-	rm -rf $(PWD)/finalise_elide
-	rm -rf $(PWD)/finalise_naive
-	rm -rf jenkins spring eclipse hadoop
+$(GRMTOOLS_SRC):
+	git clone $(GRMTOOLS_REPO) $@
+	cd $@ && git checkout $(GRMTOOLS_VERSION)
+	cd $@ && git apply $(PATCH)/grmtools.diff
+
+$(CACTUS_SRC):
+	git clone $(CACTUS_REPO) $@
+	cd $@ && git checkout $(CACTUS_VERSION)
+
+$(REGEX_SRC):
+	git clone $(CACTUS_REPO) $@
+	cd $@ && git checkout $(CACTUS_VERSION)
+
+bench: $(RESULTS)
+
+$(RESULTS_DIR)/%.csv:
+	mkdir -p $(dir $@){metrics,heaptrack,samples}
+	- $(REBENCH_EXEC) -R -D \
+		--invocations $(PEXECS) \
+		--iterations 1 \
+		-df $@ $(PWD)/rebench.conf $(subst /,-,$*)
+
+plot: $(PLOTS)
+
+$(PLOTS_DIR)/%:
+	mkdir -p $@/mem
+	$(REBENCH_PROCESSOR) $@ ../../results.bk/$(dir $*)
 
 clean-plots:
-	rm -rf plots
+	$(foreach plot, $(PLOTS_DIR), rm -rf $(plot);)
 
-clean-confirm:
-	@( read -p "Are you sure? [y/N]: " sure && case "$$sure" in [yY]) true;; *) false;; esac )
-
-clean: clean-confirm clean-builds clean-benchmarks clean-plots
-	@echo "Clean"
-
-venv: $(VENV_DIR)/bin/activate
-
-$(VENV_DIR)/bin/activate: ../requirements.txt
-	$(PYTHON) -m venv $(VENV_DIR)
-	$(PIP) install -r ../requirements.txt
+clean:
+	rm -rf $(BUILD_SRCS)
