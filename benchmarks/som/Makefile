@@ -13,6 +13,10 @@ GCVS_CFGS := $(addsuffix /perf, $(GCVS_CFGS)) $(addsuffix /mem, $(GCVS_CFGS))
 
 PATCH = $(PWD)/patches
 
+BINS = som-rs-ast som-rs-bc yksom
+RESULTS = $(foreach e,$(EXPERIMENTS),$(foreach bin,$(BINS),$(e)/$(bin)))
+RESULTS := $(addprefix $(RESULTS_DIR)/, $(addsuffix /perf.csv, $(RESULTS)) $(addsuffix /mem.csv, $(RESULTS)))
+PLOTS = $(dir $(patsubst $(RESULTS_DIR)/%.csv, $(PLOTS_DIR)/%, $(RESULTS)))
 
 all: build
 
@@ -41,16 +45,6 @@ define build_yksom
 		--root $(YKSOM_SRC)/$1
 endef
 
-define run_exp
-	mkdir -p $(dir $2)metrics
-	mkdir -p $(dir $2)heaptrack
-	mkdir -p $(dir $2)samples
-	$(REBENCH_EXEC) -R -D \
-		--invocations $(PEXECS) \
-		--iterations 1 \
-		-df $2 $(PWD)/rebench.conf $1
-endef
-
 $(GCVS_CFGS):
 	cd $(SOMRS_SRC) && git reset --hard && \
 	git apply $(PATCH)/som-rs.$(subst /,.,$(dir $@))diff
@@ -73,10 +67,23 @@ $(YKSOM_SRC):
 	cd $@ && git checkout $(YKSOM_VERSION)
 
 
-bench:
-	$(foreach bin, som-rs-ast som-rs-bc yksom, \
-		$(foreach e, $(EXPERIMENTS), \
-			$(call run_exp,$(bin)-$(subst /,-,$(e)),$(RESULTS_DIR)/$(dir $(e))$(bin)/$(notdir $(e)).csv);))
+bench: $(RESULTS)
+
+$(RESULTS_DIR)/%.csv:
+	mkdir -p $(dir $@){metrics,heaptrack,samples}
+	- $(REBENCH_EXEC) -R -D \
+		--invocations $(PEXECS) \
+		--iterations 1 \
+		-df $@ $(PWD)/rebench.conf $(subst /,-,$*)
+
+plot: $(PLOTS)
+
+$(PLOTS_DIR)/%:
+	mkdir -p $@/mem
+	$(REBENCH_PROCESSOR) $@ ../../results.bk/$(dir $*)
+
+clean-plots:
+	$(foreach plot, $(PLOTS_DIR), rm -rf $(plot);)
 
 clean:
 	rm -rf $(SOMRS_SRC) $(YKSOM_SRC)
