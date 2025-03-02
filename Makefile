@@ -100,12 +100,6 @@ $(VENV)/bin/activate: requirements.txt
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install -r requirements.txt
 
-
-$(PERF_PLOTS):
-	mkdir -p $(dir $@)
-	$(REBENCH_PROCESSOR) \
-		$(patsubst $(PWD)/plots/%, $(RESULTS)/%, $(patsubst %.svg, %.csv, $@)) $@
-
 clean: clean-confirm clean-alloy clean-builds clean-results clean-plots
 	@echo "Clean"
 
