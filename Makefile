@@ -23,7 +23,7 @@ LIBGC_SRC = $(PWD)/bdwgc
 HEAPTRACK_REPO = https://github.com/kde/heaptrack
 HEAPTRACK_VERSION = master
 HEAPTRACK_SRC = $(PWD)/heaptrack
-HEAPTRACK = $(HEAPTRACK_SRC)/bin/heaptrack
+HEAPTRACK = $(HEAPTRACK_SRC)/bin
 
 RESULTS = $(PWD)/results
 
