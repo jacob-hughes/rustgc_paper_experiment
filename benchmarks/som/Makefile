@@ -85,5 +85,8 @@ $(PLOTS_DIR)/%:
 clean-plots:
 	$(foreach plot, $(PLOTS_DIR), rm -rf $(plot);)
 
+clean-benchmarks:
+	$(foreach r, $(RESULTS), rm -rf $(r) $(r)/metrics $(r)/heaptrack $(r)/samples;)
+
 clean:
 	rm -rf $(SOMRS_SRC) $(YKSOM_SRC)
