@@ -107,7 +107,7 @@ clean-alloy:
 	rm -rf $(LIBGC_SRC) $(HEAPTRACK_SRC) $(ALLOY_SRC)/bin
 
 clean-benchmarks:
-	$(foreach b, $(BENCHMARKS), cd $(b)/ && make clean;)
+	$(foreach b, $(BENCHMARKS), cd $(b)/ && make clean-benchmarks;)
 
 clean-results:
 	rm -rf $(RESULTS)
