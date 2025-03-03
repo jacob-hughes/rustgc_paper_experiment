@@ -43,7 +43,7 @@ index 04f2ba3..9d2d79f 100644
      group_info: GroupInfo,
  }
  
-+unsafe impl<P> FinalizerSafe for Pre<P> {}
++unsafe impl<P> std::marker::FinalizerSafe for Pre<P> {}
 +
  impl<P: PrefilterI> Pre<P> {
      fn new(pre: P) -> Arc<dyn Strategy> {
@@ -123,7 +123,7 @@ index 93a0a8a..f9677e2 100644
  #[derive(Clone, Debug, Default)]
  pub struct GroupInfo(Arc<GroupInfoInner>);
  
-+unsafe impl FinalizerSafe for GroupInfo {}
++unsafe impl std::marker::FinalizerSafe for GroupInfo {}
 +
  impl GroupInfo {
      /// Creates a new group info from a sequence of patterns, where each
@@ -142,7 +142,7 @@ index 93a0a8a..f9677e2 100644
      kind: GroupInfoErrorKind,
  }
  
-+unsafe impl FinalizerSafe  for GroupInfoError {}
++unsafe impl std::marker::FinalizerSafe  for GroupInfoError {}
 +///
  /// The kind of error that occurs when building a `GroupInfo` fails.
  ///
@@ -193,7 +193,7 @@ index d20442a..b6c9bd8 100644
      max_needle_len: usize,
  }
  
-+unsafe impl FinalizerSafe for Prefilter {}
++unsafe impl std::marker::FinalizerSafe for Prefilter {}
 +
  impl Prefilter {
      /// Create a new prefilter from a sequence of needles and a corresponding
@@ -202,7 +202,7 @@ index d20442a..b6c9bd8 100644
      AhoCorasick(AhoCorasick),
  }
  
-+unsafe impl FinalizerSafe for Choice {}
++unsafe impl std::marker::FinalizerSafe for Choice {}
 +
  impl Choice {
      /// Select what is believed to be the best prefilter algorithm for the

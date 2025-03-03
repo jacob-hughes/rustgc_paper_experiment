@@ -5,3 +5,7 @@ hadoop/
 jenkins/
 spring/
 eclipse/
+parserbench/elision
+parserbench/gcvs
+parserbench/premopt
+parserbench/target

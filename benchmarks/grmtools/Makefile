@@ -24,22 +24,20 @@ JENKINS_REPO = https://github.com/jenkinsci/jenkins
 
 JAVA_SRCS = $(HADOOP_SRC) $(ECLIPSE_SRC) $(SPRING_SRC) $(JENKINS_SRC)
 BUILD_SRCS = $(GRMTOOLS_SRC) $(CACTUS_SRC) $(REGEX_SRC)
+PB_SRC = $(PWD)/parserbench
 
 GCVS_CFGS = gcvs/gc gcvs/rc
 GCVS_CFGS := $(addsuffix /perf, $(GCVS_CFGS)) $(addsuffix /mem, $(GCVS_CFGS))
 
 PATCH = $(PWD)/patches
 
-BINS = java_parse
-RESULTS = $(foreach e,$(EXPERIMENTS),$(foreach bin,$(BINS),$(e)/$(bin)))
+RESULTS = $(foreach e,$(EXPERIMENTS),$(foreach bin,grmtools,$(e)/$(bin)))
 RESULTS := $(addprefix $(RESULTS_DIR)/, $(addsuffix /perf.csv, $(RESULTS)) $(addsuffix /mem.csv, $(RESULTS)))
 PLOTS = $(dir $(patsubst $(RESULTS_DIR)/%.csv, $(PLOTS_DIR)/%, $(RESULTS)))
 
 .PHONY: all build bench clean
 
 all: venv build bench plot
-
-bench: bench-perf bench-barriers bench-elision
 
 define patch_repo
 	cd $1 && git reset --hard
@@ -48,72 +46,28 @@ define patch_repo
 		cd $1 && git apply $(P),)
 endef
 
-build: srcs $(GCVS_CFGS)
+define build_parserbench
+	@echo "Building parserbench with RUSTC=$2"
+	RUSTFLAGS="-L $(LIBGC_PATH)" RUSTC="$2" cargo install \
+		--path $(PB_SRC) \
+		--target-dir $(PB_SRC)/build/$@ \
+		--root $(PB_SRC)/$@
+endef
+
+build: srcs $(GCVS_CFGS) $(ALLOY_CFGS)
 	@echo "hello"
-
-build-perf: grmtools cactus regex
-	cd $(PWD)/cactus && git reset --hard
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/alloy/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/arc
-	cd $(PWD)/regex && git reset --hard
-	cd $(PWD)/cactus && git reset --hard
-	cd $(PWD)/regex && git apply $(PWD)/regex_gc.patch
-	cd $(PWD)/cactus && git apply $(PWD)/cactus_gc.patch
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/alloy/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/gc
-	cd $(PWD)/cactus && git reset --hard
-	cd $(PWD)/regex && git reset --hard
-
-build-barriers: grmtools cactus regex
-	cd $(PWD)/regex && git apply $(PWD)/regex_gc.patch
-	cd $(PWD)/cactus && git diff-index --quiet HEAD --
-	cd $(PWD)/cactus && git apply $(PWD)/cactus_gc.patch
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/barriers_naive/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/barriers_naive
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/barriers_none/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/barriers_none
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/barriers_opt/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/barriers_opt
-	cd $(PWD)/cactus && git reset --hard
-	cd $(PWD)/regex && git reset --hard
-
-build-elision: grmtools cactus regex
-	cd $(PWD)/regex && git apply $(PWD)/regex_gc.patch
-	cd $(PWD)/cactus && git diff-index --quiet HEAD --
-	cd $(PWD)/cactus && git apply $(PWD)/cactus_gc.patch
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/finalise_elide/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/finalise_elide
-	cd $(PWD)/parserbench && \
-		RUSTC="../../bin/alloy/finalise_naive/bin/rustc" \
-		cargo build --release --target-dir=$(PWD)/finalise_naive
-	cd $(PWD)/cactus && git reset --hard
-	cd $(PWD)/regex && git reset --hard
 
 $(GCVS_CFGS):
 	$(call patch_repo,$(CACTUS_SRC),$@)
+	$(call patch_repo,$(REGEX_SRC),$@)
+	$(call build_parserbench,$@,$(ALLOY_PATH)/gcvs/$(notdir $@)/bin/rustc)
 
-plot:
-	mkdir -p plots
-	$(PYTHON_EXEC) $(REBENCH_PROCESSOR) summary grmtools
-
-regex:
-	git clone $(REGEX_REPO) regex
-	cd regex && git checkout $(REGEX_VERSION)
-
-grmtools:
-	git clone $(GRMTOOLS_REPO) grmtools
-	cd grmtools && git checkout $(GRMTOOLS_VERSION)
-	cd $(PWD)/grmtools && git apply $(PWD)/grmtools.patch
-cactus:
-	git clone $(CACTUS_REPO) cactus
-	cd cactus && git checkout $(CACTUS_VERSION)
-
+$(ALLOY_CFGS):
+	cd $(CACTUS_SRC) && git reset --hard && \
+		git apply $(PATCH)/cactus.alloy.diff
+	cd $(REGEX_SRC) && git reset --hard && \
+		git apply $(PATCH)/regex.alloy.diff
+	$(call build_parserbench,$@,$(ALLOY_PATH)/$@/bin/rustc)
 
 srcs: $(JAVA_SRCS) $(BUILD_SRCS)
 
@@ -139,8 +93,8 @@ $(CACTUS_SRC):
 	cd $@ && git checkout $(CACTUS_VERSION)
 
 $(REGEX_SRC):
-	git clone $(CACTUS_REPO) $@
-	cd $@ && git checkout $(CACTUS_VERSION)
+	git clone $(REGEX_REPO) $@
+	cd $@ && git checkout $(REGEX_VERSION)
 
 bench: $(RESULTS)
 
@@ -159,6 +113,9 @@ $(PLOTS_DIR)/%:
 
 clean-plots:
 	$(foreach plot, $(PLOTS_DIR), rm -rf $(plot);)
+
+clean-benchmarks:
+	$(foreach r, $(RESULTS), rm -rf $(r) $(r)/metrics $(r)/heaptrack $(r)/samples;)
 
 clean:
 	rm -rf $(BUILD_SRCS)
