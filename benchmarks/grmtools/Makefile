@@ -109,7 +109,7 @@ plot: $(PLOTS)
 
 $(PLOTS_DIR)/%:
 	mkdir -p $@/mem
-	$(REBENCH_PROCESSOR) $@ ../../results.bk/$(dir $*)
+	$(REBENCH_PROCESSOR) $@ $(RESULTS_DIR)/$(dir $*)
 
 clean-plots:
 	$(foreach plot, $(PLOTS_DIR), rm -rf $(plot);)
