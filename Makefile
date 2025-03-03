@@ -27,7 +27,8 @@ HEAPTRACK = $(HEAPTRACK_SRC)/bin
 
 RESULTS = $(PWD)/results
 
-BENCHMARKS = $(PWD)/benchmarks/som
+BENCHMARKS = grmtools
+BENCHMARKS := $(addprefix $(PWD)/benchmarks/, $(BENCHMARKS))
 
 export ALLOY_PATH = $(ALLOY_SRC)/bin
 export LIBGC_PATH = $(LIBGC_SRC)/lib
