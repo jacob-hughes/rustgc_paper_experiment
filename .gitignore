@@ -4,7 +4,6 @@ heaptrack/
 plots/
 results/
 venv/
-src/
 bin/
 build/
 
