@@ -1099,9 +1099,9 @@ def main():
         print_warning(f"File {STATS_FILE} already exists. Removing...")
         os.remove(STATS_FILE)
 
-    # process_gcvs()
+    process_gcvs()
     # process_premopt()
-    process_elision()
+    # process_elision()
 
     # if not os.path.exists(RESULTS_DIR / "perf.csv") and not os.path.exists(
     #     RESULTS_DIR / "mem.csv"

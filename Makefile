@@ -25,8 +25,8 @@ HEAPTRACK_VERSION = master
 HEAPTRACK_SRC = $(PWD)/heaptrack
 HEAPTRACK = $(HEAPTRACK_SRC)/bin
 
-# BENCHMARKS = som grmtools
-BENCHMARKS = som grmtools alacritty fd regex-redux binary-trees
+BENCHMARKS = grmtools ripgrep alacritty fd som
+# BENCHMARKS = som grmtools alacritty fd regex-redux binary-trees ripgrep
 # BENCHMARKS = regex-redux
 # BENCHMARKS = som grmtools binary-trees grmtools
 BENCHMARK_DIRS := $(addprefix $(PWD)/benchmarks/, $(BENCHMARKS))
@@ -94,11 +94,13 @@ $(HEAPTRACK): $(HEAPTRACK_SRC)
 build: build-alloy
 	$(foreach b, $(BENCHMARK_DIRS), cd $(b)/ && make build;)
 
-bench: $(RESULTS)
+bench: venv $(RESULTS)
 
 $(RESULTS_DIR)/%/data.csv:
 	@echo $*
-	mkdir -p $(dir $@)metrics/{runtime,heaptrack,rss}
+	mkdir -p $(dir $@)metrics/runtime
+	mkdir -p $(dir $@)metrics/heaptrack
+	mkdir -p $(dir $@)metrics/rss
 	- $(REBENCH_EXEC) -R -D \
 		--invocations $(PEXECS) \
 		--iterations 1 \
