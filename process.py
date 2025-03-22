@@ -8,10 +8,12 @@ import os
 import pprint
 import random
 import sys
+import warnings
 from os import listdir, stat
 from pathlib import Path
 from statistics import geometric_mean, stdev
 
+warnings.simplefilter(action="ignore", category=FutureWarning)
 import matplotlib
 import matplotlib.lines
 import matplotlib.patches as mpatches
@@ -26,8 +28,7 @@ from scipy import stats
 
 PLOT_DIR = None
 RESULTS_DIR = None
-EXPERIMENT = None
-BIN = None
+STATS_FILE = None
 PEXECS = int(os.environ["PEXECS"])
 Z = 2.576  # 99% interval
 
@@ -69,6 +70,15 @@ def bytes_formatter(max_value):
     return FuncFormatter(format_func), unit
 
 
+def format_number(number):
+    suffixes = ["", "K", "M", "B", "T"]
+    magnitude = 0
+    while abs(number) >= 1000 and magnitude < len(suffixes) - 1:
+        number /= 1000.0
+        magnitude += 1
+    return f"{number:.1f}{suffixes[magnitude]}".replace(".0", "")
+
+
 # ============== PLOT FORMATTING =================
 
 matplotlib.use("Agg")
@@ -96,7 +106,7 @@ matplotlib.rcParams.update(
         "xtick.minor.size": 0,
         "ytick.minor.size": 0,
         # Legend and figure settings
-        # "legend.title_fontsize": 0,
+        "legend.title_fontsize": 0,
         "errorbar.capsize": 2,
     }
 )
@@ -116,6 +126,9 @@ SUITES = {
 CFGS = {
     "gcvs-gc": "Alloy",
     "gcvs-rc": "RC",
+    "gcvs-arc": "ARC",
+    "gcvs-typed-arena": "Typed Arena",
+    "gcvs-rust-gc": "Rust-GC",
     "premopt-opt": "Barriers Opt",
     "premopt-naive": "Barriers Naive",
     "premopt-none": "Barriers None",
@@ -135,16 +148,63 @@ METRICS = {
     "STW pauses": r"Gc Cycles",
 }
 
+BASELINE = {
+    "som-rs-ast": "gcvs-rc",
+    "som-rs-bc": "gcvs-rc",
+    "grmtool": "gcvs-rc",
+    "binary-t": "gcvs-typed_arena",
+    "regex-redux": "gcvs-arc",
+    "alacritty": "gcvs-arc",
+    "fd": "gcvs-arc",
+    "ripgrep": "gcvs-arc",
+}
+
+PERF_PLOT_WIDTHS = {
+    "alacritty": 8,
+    "binary-trees": 8,
+    "regex-redux": 8,
+    "ripgrep": 8,
+    "static-web-server": 8,
+    "som": 8,
+    "grmtools": 8,
+    "fd": 8,
+}
+
+PROFILE_PLOTS = {
+    "grmtools": {"r": 1, "c": 4},
+    "alacritty": {"r": 1, "c": 4},
+    "som": {"r": 7, "c": 4},
+    "som": {"r": 7, "c": 4},
+}
+
 # ============== STATISTICS =================
+
+
+def pdiff(a, b):
+    return (a / (a + b)) * 100
 
 
 def ci(row, pexecs):
     return Z * (row / math.sqrt(pexecs))
 
 
+def ci_inl(row, pexecs):
+    return pd.Series({"value": row, "ci": Z * (row / math.sqrt(pexecs))})
+
+
 def bootstrap(
     values, kind, method, num_bootstraps=10000, confidence=0.99, symmetric=True
 ):
+
+    if PEXECS == 1:
+        if symmetric:
+            return pd.Series(
+                {
+                    "value": kind(values),
+                    "ci": 0,
+                }
+            )
+
     res = stats.bootstrap(
         (values,),
         statistic=kind,
@@ -244,10 +304,10 @@ def normalize(df, baseline_col):
         idx = np.abs(baseline.index - time_value).argmin()
         return baseline.iloc[idx]
 
-    def normalize_value(row, value_col, timecol):
+    def normalize_value(row, value_col, nearest):
         if baseline.empty:
             return np.nan
-        nearest = find_nearest(row[timecol])
+        # nearest = find_nearest(row[timecol])
         return row[value_col] / nearest[value_col]
 
     def normalize_ci(row, value_col, ci_col, timecol):
@@ -267,7 +327,10 @@ def normalize(df, baseline_col):
     for value_col, ci_col in zip(normcols[::2], normcols[1::2]):
         df.loc[df["configuration"].isin(cmps), value_col] = df[
             df["configuration"].isin(cmps)
-        ].apply(lambda row: normalize_value(row, value_col, timecol), axis=1)
+        ].apply(
+            lambda row: normalize_value(row, value_col, find_nearest(row[timecol])),
+            axis=1,
+        )
         df.loc[df["configuration"].isin(cmps), ci_col] = df[
             df["configuration"].isin(cmps)
         ].apply(lambda row: normalize_ci(row, value_col, ci_col, timecol), axis=1)
@@ -359,8 +422,93 @@ def interpolate(df, oversampling=1):
 # ============== GRAPHS =================
 
 
-def plot_perf_bar(outfile, values, errs, width):
+def write_stat(stat):
+    with open(STATS_FILE, "a") as f:
+        f.write(stat + "\n")
+
+
+def plot_perf(outfile, values, rows, cols):
+    values["configuration"] = values["configuration"].replace(CFGS)
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(PERF_PLOT_WIDTHS[outfile.parts[-2]], rows * 3)
+    )
+    if rows * cols == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+
+    num_cfgs = values["configuration"].nunique()
+    colours = [sns.color_palette("colorblind")[i] for i in range(num_cfgs)]
+
+    formatter = ScalarFormatter()
+    formatter.set_scientific(False)
+
+    num_benchmarks = values["benchmark"].nunique()
+
+    for i, (suite, results) in enumerate(values.groupby("suite")):
+        ax = axes[i]
+        ax.set_title(f"{suite}")
+
+        df = results.pivot(
+            index="benchmark", columns="configuration", values=["value", "ci"]
+        )
+        df.plot(kind="bar", y="value", yerr="ci", ax=axes[i], width=0.8)
+
+        ax.legend().set_title(None)
+        if i != 0:
+            ax.legend().set_visible(False)
+
+        ax.set_xticklabels(df.index, rotation=45, ha="right")
+        ax.set_ylabel("Wall-clock time (ms)\n(lower is better)")
+        ax.xaxis.label.set_visible(False)
+        ax.yaxis.set_major_formatter(formatter)
+
+    plt.tight_layout()
+    plt.savefig(outfile, format="svg", bbox_inches="tight")
+    print_success(
+        f"Plotted graph: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem}:individual"
+    )
+
+
+def plot_perf_aggregate(outfile, values, width):
+    # values["configuration"] = values["configuration"].replace(CFGS)
     fig, ax = plt.subplots(figsize=(width, 4))
+
+    num_cfgs = values["configuration"].nunique()
+    colours = [sns.color_palette("colorblind")[i] for i in range(num_cfgs)]
+
+    formatter = ScalarFormatter()
+    formatter.set_scientific(False)
+
+    num_benchmarks = values["benchmark"].nunique()
+
+    for i, (suite, results) in enumerate(values.groupby("suite")):
+        ax = axes[i]
+        ax.set_title(f"{suite}")
+
+        df = results.pivot(
+            index="benchmark", columns="configuration", values=["value", "ci"]
+        )
+        df.plot(kind="bar", y="value", yerr="ci", ax=axes[i], width=0.8)
+
+        ax.legend().set_title(None)
+        if i != 0:
+            ax.legend().set_visible(False)
+
+        ax.set_xticklabels(df.index, rotation=45, ha="right")
+        ax.set_ylabel("Wall-clock time (ms)\n(lower is better)")
+        ax.xaxis.label.set_visible(False)
+        ax.yaxis.set_major_formatter(formatter)
+
+    plt.tight_layout()
+    plt.savefig(outfile, format="svg", bbox_inches="tight")
+    print_success(
+        f"Plotted graph: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem}:individual"
+    )
+
+
+def plot_perf_bar(outfile, values, errs, width):
+    fig, ax = plt.subplots(figsize=(width, 3))
     values = values.rename(columns=CFGS)
     errs = errs.rename(columns=CFGS)
     values.plot(kind="bar", ax=ax, width=0.8, yerr=errs)
@@ -375,7 +523,7 @@ def plot_perf_bar(outfile, values, errs, width):
 
     plt.tight_layout()
     plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {EXPERIMENT}:{BIN}:perf")
+    print_success(f"Plotted graph: {EXPERIMENT}:{BIN}:perf:individual")
 
 
 def plot_mem_bar(outfile, values, errs, width):
@@ -404,7 +552,10 @@ def plot_mem_bar(outfile, values, errs, width):
 def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
     benchmarks["configuration"] = benchmarks["configuration"].replace(CFGS)
     fig, axes = plt.subplots(rows, cols, figsize=(16, 16))
-    axes = axes.flatten()
+    if rows * cols == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
 
     num_cfgs = benchmarks["configuration"].nunique()
     num_benchmarks = benchmarks["benchmark"].nunique()
@@ -483,32 +634,73 @@ def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
     )
     plt.tight_layout(rect=[0.01, 0.01, 1, 1])
     plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {EXPERIMENT}:{BIN}:mem:profiles")
+    print_success(
+        f"Plotted graph: {outfile.parts[-4]}:{outfile.parts[-3]}:{outfile.stem}:profiles"
+    )
 
 
-def parse_metrics(dir):
-    files = glob.glob(f"{dir}/*.csv")
-    headers = [
-        "elision enabled",
-        "premature finalizer prevention enabled",
-        "premopt enabled",
-        "finalizers registered",
-        "finalizers elided",
-        "finalizers completed",
-        "barriers visited",
-        "Gc allocated",
-        "Box allocated",
-        "Rc allocated",
-        "Arc allocated",
-        "STW pauses",
-    ]
+def parse_rt_metrics(dir):
+    files = glob.glob(f"{dir / "runtime"}/*.csv")
+    data = []
+    mem_summary = []
+    for f in files:
+        flags = (
+            pd.read_csv(f, usecols=[0, 1, 2])
+            .tail(1)
+            .replace({"true": True, "false": False})
+        )
+        df = pd.read_csv(f, usecols=list(range(3, 12))).tail(1).astype(float)
+        base = os.path.splitext(os.path.basename(f))[0].split(".")
+
+        exp = base[2].split("-")[0]
+        cfg = base[2].split("-")[1]
+
+        if exp == "gcvs":
+            assert flags.all().all()
+        elif exp == "premopt":
+            assert flags["elision enabled"].all()
+            if cfg == "opt":
+                assert flags["pfp enabled"].all()
+                assert flags["premopt enabled"].all()
+            elif cfg == "naive":
+                assert flags["pfp enabled"].all()
+                assert (~flags)["premopt enabled"].all()
+            else:
+                assert (~flags)["pfp enabled"].all()
+                assert (~flags)["premopt enabled"].all()
+        elif exp == "elision":
+            assert flags["pfp enabled"].all()
+            assert flags["premopt enabled"].all()
+            if cfg == "opt":
+                assert flags["elision enabled"].all()
+            else:
+                assert (~flags)["elision enabled"].all()
+        else:
+            print_error(f"Unknown experiment {exp}")
+            sys.exit(1)
+
+        df["suite"] = base[0].rstrip("-harness")
+        df["pexec"] = base[1]
+        df["configuration"] = base[2]
+        df["benchmark"] = base[3]
+        data.append(df)
+
+    df_mt = pd.concat(data, ignore_index=True)
+    df_ht = parse_ht_summary(dir)
+    return df_mt.merge(df_ht, on=["suite", "configuration", "benchmark", "pexec"])
+
+
+def parse_ht_summary(dir):
+    files = glob.glob(f"{dir / "heaptrack"}/*summary.csv")
     data = []
     for f in files:
-        df = pd.read_csv(f, names=headers, skiprows=1)
+        df = pd.read_csv(f).tail(1).astype(float)
         base = os.path.splitext(os.path.basename(f))[0].split(".")
-        df["pexec"] = base[0]
-        df["configuration"] = base[1]
-        df["benchmark"] = base[2]
+        df["suite"] = base[0].rstrip("-harness")
+        df["pexec"] = base[1]
+        df["configuration"] = base[2]
+        df["benchmark"] = base[3]
+        df = df.drop(columns=["temporary allocations"])
         data.append(df)
     return pd.concat(data, ignore_index=True)
 
@@ -528,9 +720,10 @@ def parse_heaptrack(dir):
                     mem_heap = int(line.split("=")[1])
                     data.append(
                         {
-                            "configuration": base[1],
-                            "benchmark": base[2],
-                            "pexec": base[0],
+                            "suite": base[0].rstrip("-harness"),
+                            "pexec": base[1],
+                            "configuration": base[2],
+                            "benchmark": base[3],
                             "snapshot": snapshot,
                             "time": time,
                             "mem": mem_heap,
@@ -553,116 +746,375 @@ def parse_sampler(dir):
     return pd.concat(data, ignore_index=True)
 
 
-def parse_rebench(csv):
-    df = pd.read_csv(csv, sep="\t", skiprows=4, index_col="benchmark")
-    pexecs = int(df["invocation"].max())
-    assert pexecs == PEXECS
-    perf = df[df["criterion"] == "total"].rename(columns={"value": "wallclock"})
-    perf = perf[["executor", "wallclock"]]
-    rss = df[df["criterion"] == "MaxRSS"].rename(columns={"value": "maxrss"})
-    rss = rss[["executor", "maxrss"]]
-    df = pd.merge(perf, rss, on=["benchmark", "executor"]).groupby(
-        ["benchmark", "executor"]
+def parse_results(expdir):
+    results = {}
+    for prog in os.scandir(expdir):
+        if not prog.is_dir():
+            print_warning(f"Skipping unknown file {prog}...")
+            continue
+
+        data = Path(prog.path) / "data.csv"
+
+        if not data.exists():
+            print_error(f"No perf data found for {prog}")
+            continue
+        perf = pd.read_csv(data, sep="\t", skiprows=4, index_col="suite")
+        pexecs = int(perf["invocation"].max())
+        if pexecs != PEXECS:
+            print_error(
+                f"{prog} perf data contains incorrect number of process executions. Skipping.."
+            )
+            continue
+        perf = perf[perf["executor"].str.endswith("perf")]
+        perf["executor"] = perf["executor"].str.removesuffix("-perf")
+        perf = perf[perf["criterion"] == "total"].rename(
+            columns={"value": "wallclock", "executor": "configuration"}
+        )
+        perf = perf[["benchmark", "configuration", "wallclock"]]
+        mem = parse_heaptrack(Path(prog.path) / "metrics" / "heaptrack")
+        metrics = parse_rt_metrics(Path(prog.path) / "metrics")
+        results[prog.name] = (perf, mem, metrics)
+    return results
+
+
+def process_rt_metrics(metrics):
+    def gmean_zeroes(series):
+        positive_series = series[(series > 0)]
+        if len(positive_series) == 0:
+            return np.nan
+        return np.exp(np.log(positive_series).mean())
+
+    df = (
+        metrics.groupby(["suite", "configuration", "benchmark"])
+        .mean(numeric_only=True)
+        .reset_index()
+        .drop(columns=["benchmark"])
     )
+
+    df = df.groupby(["suite", "configuration"]).apply(gmean_zeroes).round().fillna(0)
+
     return df
 
 
-def add_gcvs_overview_entry():
-    pass
-
-
-def process_perf():
-    df = parse_rebench(RESULTS_DIR / "perf.csv")
-    perf, cis = aggregate(df, "wallclock", bootstrap_mean_ci)
-    # maxrss = aggregate(pdata, "maxrss", bootstrap_mean_ci)
-
-    plot_perf_bar(
-        PLOT_DIR / "perf.svg",
-        perf,
-        cis,
-        width=8,
+def process_perf(perf):
+    df = (
+        perf.groupby(["suite", "configuration", "benchmark"])["wallclock"]
+        .apply(bootstrap_mean_ci)
+        .unstack()
+        .reset_index()
     )
+    if perf["benchmark"].nunique() == 1:
+        return df
+
+    pivot_df = df.pivot(index="benchmark", columns="configuration", values="value")
+
+    # Calculate slowdown ratio (gcvs-gc / gcvs-arc)
+    slowdown_series = pivot_df["gcvs-gc"] / pivot_df["gcvs-arc"]
+
+    # Add the slowdown column only to gcvs-gc rows
+    df["slowdown"] = np.nan
+    df.loc[df["configuration"] == "gcvs-gc", "slowdown"] = df["benchmark"].map(
+        slowdown_series
+    )
+
+    # data[data['configuration'] == BASELINE[suite]].iloc[0])
+    for suite, data in df.groupby("suite"):
+        print(data)
+    #     for row in data.sort_values(by='value'):
+    #         print(row)
+    #     for row in data.loc[data.groupby('configuration')['value'].idxmin()].itertuples():
+    #         print(row)
+
+    gmean = (
+        df.groupby(["suite", "configuration"])["value"]
+        .apply(bootstrap_geomean_ci)
+        .unstack()
+        .reset_index()
+    )
+    gmean = gmean.rename(
+        columns={
+            "value": "gmean",
+            "ci_upper": "gerr_upper",
+            "ci_lower": "gerr_lower",
+        },
+    )
+    for row in gmean.itertuples():
+        s = row.suite.replace("-", "")
+        e = row.configuration.split("-")[0]
+        c = row.configuration.split("-")[1]
+        write_stat(f"\\newcommand\\{e}{c}{s}gmean{{{row.gmean:0.2f}\\xspace}}")
+
+    return df.merge(gmean, on=["suite", "configuration"])
 
 
 def process_gcvs():
-    process_perf()
+    results = parse_results(RESULTS_DIR / "gcvs")
+    processed = {}
+    perfs = {}
+    conversions = {}
+
+    for prog, (perf, mem, metrics) in results.items():
+        print_info(f"{prog}")
+
+        # Process metrics
+
+        totals = (
+            metrics.groupby(["suite", "configuration", "benchmark"])
+            .mean(numeric_only=True)
+            .reset_index()
+            .drop(columns=["benchmark"])
+            .groupby(["suite", "configuration"])
+            .sum()
+            .reset_index()
+        )
+        conv = pd.DataFrame()
+
+        totals["pct_rc"] = pdiff(
+            totals["Arc allocated"] + totals["Rc allocated"], totals["allocations"]
+        )
+        totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
+        totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
+        totals["pct_managed"] = pdiff(totals["Gc reclaimed"], totals["allocations"])
+
+        cols = [
+            "suite",
+            "configuration",
+            "allocations",
+            "pct_rc",
+            "pct_gc",
+            "pct_managed",
+            "Gc reclaimed",
+        ]
+        # totals = totals[cols]
+        # totals = totals.set_index(['suite','configuration'])
+
+        for suite, data in totals.groupby("suite"):
+            rc_leaks = round(
+                totals[totals["configuration"] == BASELINE[suite]][
+                    "leaked allocations"
+                ].iloc[0]
+            )
+            gc = data[data["configuration"] == "gcvs-gc"]
+            gc_leaks = gc["leaked allocations"].iloc[0]
+            all = gc["allocations"].iloc[0]
+            rcs = gc["Rc allocated"].iloc[0] + gc["Arc allocated"].iloc[0]
+            gcs = gc["Gc allocated"].iloc[0]
+            box_ctors = gc["Box allocated"].iloc[0]
+            num_swept = gc["Gc reclaimed"].iloc[0]
+            all = gc["allocations"].iloc[0]
+            finalizers_run = gc["finalizers completed"].iloc[0]
+            freg = gc["finalizers registered"].iloc[0]
+
+            # We use the difference between RC and GC leaks as a proxy for the
+            # number of 'GC' objects still on the heap (because Rc will
+            # deterministically drop on exit, whereas Gc will not). This is not
+            # hugely accurate, but will always serve as a 'lower bound'. There
+            # is however one case where we need to be a bit careful: benchmarks
+            # with cycles can cause large amounts of cyclic Rc garbage which
+            # can exceed the number of GC leaks. In such cases, we don't want
+            # to include this as it would cause us to erroneously think we
+            # converted fewer objects to GC than we had.
+            gc_leaks = max(gc["leaked allocations"].iloc[0] - rc_leaks, 0)
+
+            pct_gc = (gcs / all) * 100
+            gcs_trans = num_swept + gc_leaks + finalizers_run
+            pct_gt = (gcs_trans / all) * 100
+            print_info(f"{suite}")
+            print("finalizers run ", finalizers_run)
+            print("finalizers registered ", freg)
+            print_info(f"Total objects {format_number(all)}")
+            print_info(f"Box constructors {format_number(box_ctors)}")
+            print_info(f"Managed objects {format_number(gcs_trans)}")
+            print_info(f"RC leaks {format_number(rc_leaks)}")
+            print_info(f"GC leaks {format_number(gc_leaks)}")
+            print_info(f"GC constructors {format_number(gcs)}")
+            print_info(f"(a)RC constructors {format_number(rcs)}")
+            print_info(f"PCT managed: {pct_gt:.2f}")
+            print_info(f"PCT explicit GC:{pct_gc:.2f}")
+
+            s = suite.replace("-", "")
+
+            write_stat(f"\n% {suite} conversion stats")
+            write_stat(f"\\newcommand\\{s}heapgcpct{{{pct_gc:.2f}\\%\\xspace}}")
+            write_stat(f"\\newcommand\\{s}heapgctpct{{{pct_gt:.2f}\\%\\xspace}}")
+            write_stat(f"\\newcommand\\{s}heapall{{{format_number(all)}\\xspace}}")
+            write_stat(f"\\newcommand\\{s}heapgcs{{{format_number(gcs)}\\xspace}}")
+            write_stat(
+                f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}"
+            )
+
+        p = process_perf(perf)
+        perf_graph = PLOT_DIR / "gcvs" / prog / "perf.svg"
+        perf_graph.parent.mkdir(parents=True, exist_ok=True)
+        plot_perf(
+            perf_graph,
+            p,
+            rows=p["suite"].nunique(),
+            cols=1,
+        )
+        # for suite, results in mem.groupby("suite"):
+        #     profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
+        #     profile.parent.mkdir(parents=True, exist_ok=True)
+        #     m = interpolate(normalize_time(results), oversampling=0.1)
+        #
+        #     bms = m["benchmark"].nunique()
+        #     if bms == 1:
+        #         rows = 1
+        #         cols = 1
+        #     else:
+        #         rows = 7
+        #         cols = 4
+        #     plot_mem_time_series(profile, m, rows, cols, cmp=False)
+
+
+def process_elision():
+    results = parse_results(RESULTS_DIR / "elision")
+    processed = {}
+    perfs = {}
+
+    for prog, (perf, mem, metrics) in results.items():
+        print_info(f"{prog}")
+
+        # m = process_rt_metrics(metrics)
+
+        p = process_perf(perf)
+        perf_graph = PLOT_DIR / "elision" / prog / "perf.svg"
+        perf_graph.parent.mkdir(parents=True, exist_ok=True)
+        # if p["benchmark"].nunique() != 1:
+        # Don't plot graphs for single benchmarks
+        plot_perf(
+            perf_graph,
+            p,
+            rows=p["suite"].nunique(),
+            cols=1,
+        )
+        for suite, results in mem.groupby("suite"):
+            profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            m = interpolate(normalize_time(results), oversampling=0.1)
+
+            bms = m["benchmark"].nunique()
+            if bms == 1:
+                rows = 1
+                cols = 1
+            else:
+                rows = 7
+                cols = 4
+            plot_mem_time_series(profile, m, rows, cols, cmp=True)
+    # process_perf()
     # RSS data tends to be an unreliable metric since it includes memory of
     # shared libraries, heap, stack, and code segments. See [1]
     #
     # [1]: https://community.ibm.com/community/user/aiops/blogs/riley-zimmerman/2021/07/05/memory-measurements-part3
-    rss = parse_sampler(resultsdir / "samples")
-    rss = interpolate(normalize_time(rss))
-    rss["configuration"] = rss["configuration"] + " rss"
-    mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-    mem = interpolate(normalize_time(mem), oversampling=0.1)
-    plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
-    add_gcvs_overview_entry()
+    # rss = parse_sampler(resultsdir / "samples")
+    # rss = interpolate(normalize_time(rss))
+    # rss["configuration"] = rss["configuration"] + " rss"
+    # mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
+    # mem = interpolate(normalize_time(mem), oversampling=0.1)
+    # plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
+    # add_gcvs_overview_entry()
 
 
 def process_premopt():
-    metrics = parse_metrics(RESULTS_DIR / "metrics")
+    results = parse_results(RESULTS_DIR / "premopt")
+    processed = {}
+    perfs = {}
 
-    # Basic sanity checking
-    premopt = metrics[metrics["configuration"] == "premopt-opt"]
-    naive = metrics[metrics["configuration"] == "premopt-naive"]
-    none = metrics[metrics["configuration"] == "premopt-none"]
+    for prog, (perf, mem, metrics) in results.items():
+        print_info(f"{prog}")
 
-    assert (
-        premopt["premature finalizer prevention enabled"].astype("int")
-        == 1 & premopt["premopt enabled"].astype("int")
-        == 1
-    ).all()
+        p = process_perf(perf)
+        perf_graph = PLOT_DIR / "premopt" / prog / "perf.svg"
+        perf_graph.parent.mkdir(parents=True, exist_ok=True)
+        # if p["benchmark"].nunique() != 1:
+        # Don't plot graphs for single benchmarks
+        plot_perf(
+            perf_graph,
+            p,
+            rows=p["suite"].nunique(),
+            cols=1,
+        )
+        # for suite, results in mem.groupby("suite"):
+        #     profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
+        #     profile.parent.mkdir(parents=True, exist_ok=True)
+        #     m = interpolate(normalize_time(results), oversampling=0.1)
+        #
+        #     bms = m["benchmark"].nunique()
+        #     if bms == 1:
+        #         rows = 1
+        #         cols = 1
+        #     else:
+        #         rows = 7
+        #         cols = 4
+        #     plot_mem_time_series(profile, m, rows, cols, cmp=False)
+    # process_perf()
+    # RSS data tends to be an unreliable metric since it includes memory of
+    # shared libraries, heap, stack, and code segments. See [1]
+    #
+    # [1]: https://community.ibm.com/community/user/aiops/blogs/riley-zimmerman/2021/07/05/memory-measurements-part3
+    # rss = parse_sampler(resultsdir / "samples")
+    # rss = interpolate(normalize_time(rss))
+    # rss["configuration"] = rss["configuration"] + " rss"
+    # mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
+    # mem = interpolate(normalize_time(mem), oversampling=0.1)
+    # plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
+    # add_gcvs_overview_entry()
 
-    assert (
-        naive["premature finalizer prevention enabled"].astype("int")
-        == 1 & naive["premopt enabled"].astype("int")
-        == 0
-    ).all()
 
-    assert (
-        none["premature finalizer prevention enabled"].astype("int")
-        == 0 & none["premopt enabled"].astype("int")
-        == 0
-    ).all()
-
-    process_perf()
-    mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-    mem = interpolate(normalize_time(mem), oversampling=0.05)
-    norm = normalize(mem, baseline_col="premopt-none")
-    plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
+# def process_premopt():
+#     metrics = parse_metrics(RESULTS_DIR / "metrics")
+#
+#     # Basic sanity checking
+#     premopt = metrics[metrics["configuration"] == "premopt-opt"]
+#     naive = metrics[metrics["configuration"] == "premopt-naive"]
+#     none = metrics[metrics["configuration"] == "premopt-none"]
+#
+#     process_perf()
+#     mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
+#     mem = interpolate(normalize_time(mem), oversampling=0.05)
+#     norm = normalize(mem, baseline_col="premopt-none")
+#     plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
 
 
-def process_elision():
-    process_perf()
-    mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-    mem = interpolate(normalize_time(mem), oversampling=0.05)
-    norm = normalize(mem, baseline_col="elision-naive")
-    plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
+# def process_elision():
+#     process_perf()
+#     mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
+#     mem = interpolate(normalize_time(mem), oversampling=0.05)
+#     norm = normalize(mem, baseline_col="elision-naive")
+#     plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
 
 
 def main():
     global RESULTS_DIR
     global PLOT_DIR
-    global BIN
-    global EXPERIMENT
+    global STATS_FILE
 
     RESULTS_DIR = Path(sys.argv[2])
     PLOT_DIR = Path(sys.argv[1])
-    BIN = Path(sys.argv[1]).parts[-1]
-    EXPERIMENT = Path(sys.argv[1]).parts[-2]
+    STATS_FILE = PLOT_DIR / "experiment_stats.tex"
 
-    if not os.path.exists(RESULTS_DIR / "perf.csv") and not os.path.exists(
-        RESULTS_DIR / "mem.csv"
-    ):
-        print_error(f"No data found for {EXPERIMENT}:{BIN}.")
-        sys.exit()
+    PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if EXPERIMENT == "gcvs":
-        process_gcvs()
-    elif EXPERIMENT == "premopt":
-        process_premopt()
-    elif EXPERIMENT == "elision":
-        process_elision()
+    if os.path.exists(STATS_FILE):
+        print_warning(f"File {STATS_FILE} already exists. Removing...")
+        os.remove(STATS_FILE)
+
+    # process_gcvs()
+    # process_premopt()
+    process_elision()
+
+    # if not os.path.exists(RESULTS_DIR / "perf.csv") and not os.path.exists(
+    #     RESULTS_DIR / "mem.csv"
+    # ):
+    #     print_error(f"No data found for {EXPERIMENT}:{BIN}.")
+    #     sys.exit()
+    #
+    # if EXPERIMENT == "gcvs":
+    #     process_gcvs()
+    # elif EXPERIMENT == "premopt":
+    #     process_premopt()
+    # elif EXPERIMENT == "elision":
+    #     process_elision()
 
 
 if __name__ == "__main__":
