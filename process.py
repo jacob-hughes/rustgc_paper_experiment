@@ -27,10 +27,13 @@ from matplotlib.ticker import FuncFormatter, ScalarFormatter
 from scipy import stats
 
 PLOT_DIR = None
-NOPLOT = True
+DRYRUN = os.environ.get("DRYRUN", "false") in ["true", "on", "1", "yes"]
 RESULTS_DIR = None
 STATS_FILE = None
 PEXECS = int(os.environ["PEXECS"])
+PROCESS_EXPERIMENT = os.environ.get("PROCESS_EXPERIMENT", "").split()
+PROCESS_BENCHMARK = os.environ.get("PROCESS_BENCHMARK", "").split()
+PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "").split()
 Z = 2.576  # 99% interval
 
 # ============== HELPERS =================
@@ -89,8 +92,17 @@ def format_bytes(number):
     return f"{number:.2f}{suffixes[magnitude]}".replace(".00", "")
 
 
+def ltxify(s):
+    s = s.replace("_", " ").replace("-", " ")
+    return " ".join(word.capitalize() for word in s.split())
+
+
 def format_value_ci(row):
-    return f"{row['value']:.2f} \\footnotesize{{± {row['ci']:.3f}}}"
+    dryrun = "\\jake{{This comment has been automatically inserted to warn you that the CIs were generated with the DRYRUN flag, reducing their bootstrap iterations to only 100. You definitely don't want this and left it in accidentally.}}"
+    s = f"{row['value']:.2f} \\footnotesize{{± {row['ci']:.3f}}}"
+    if DRYRUN:
+        s = s + dryrun
+    return s
 
 
 def format_mem_ci(row):
@@ -129,7 +141,7 @@ matplotlib.rcParams.update(
     }
 )
 
-EXPERIMENTS = {
+PROCESS_EXPERIMENTS = {
     "gcrc": r"GcRc",
     "elision": r"Elision",
     "premopt": r"PremOpt",
@@ -174,6 +186,7 @@ BASELINE = {
     "som-rs-ast": "gcvs-rc",
     "som-rs-bc": "gcvs-rc",
     "grmtool": "gcvs-rc",
+    "grmtools": "gcvs-rc",
     "binary-t": "gcvs-arc",
     "binary-trees": "gcvs-arc",
     "regex-redux": "gcvs-arc",
@@ -220,6 +233,11 @@ def ci_inl(row, pexecs):
 def bootstrap(
     values, kind, method, num_bootstraps=10000, confidence=0.99, symmetric=True
 ):
+
+    if DRYRUN:
+        # This should never be used for real, but it's useful to prevent things
+        # taking forever when trying to quickly debug the script
+        num_bootstraps = 100
 
     if PEXECS == 1:
         if symmetric:
@@ -452,7 +470,7 @@ def write_stat(stat):
         f.write(stat + "\n")
 
 
-def write_stats(df, experiment, summary=False):
+def write_stats(df, experiment, fmt, summary=False):
     ltxmap = {
         "best": "best",
         "worst": "worst",
@@ -460,25 +478,32 @@ def write_stats(df, experiment, summary=False):
         "worst_all": "worstsi",
         "diff_pct": "pct",
     }
+
+    ltxfmt = {"perf": lambda x: f"{x:0.2f}", "mem": format_bytes}
+
+    df = df.fillna("")
+
     for (suite, cfg), row in df.iterrows():
-        write_stat(f"\n% {suite} {cfg.split('-')[1]} perf summary stats")
-        latex_name = experiment + suite.replace("-", "") + cfg.split("-")[1]
-        print_info(latex_name)
+        write_stat(f"% Config stats: {experiment}:{suite}:{cfg.split('-')[1]}:{fmt}")
+        latex_name = experiment + fmt + suite.replace("-", "")
+        if not summary:
+            latex_name = latex_name + cfg.split("-")[1]
         for (kind, name), value in row.items():
+            if not value:
+                continue
             if name == "diff_pct":
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}pct{{{value:0.2f}\\%}}\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}pct{{{value:0.2f}\\%\\xspace}}"
                 )
             elif name == "benchmark":
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}benchmark{{{value}}}\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}benchmark{{{ltxify(value)}\\xspace}}"
                 )
             elif name == "value":
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}value{{{value:0.2f}}}\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}value{{{ltxfmt[fmt](value)}\\xspace}}"
                 )
-
-            print(kind, name, value)
+        write_stat("")
 
 
 def write_table(outfile, df):
@@ -492,16 +517,19 @@ def write_table(outfile, df):
         position=None,
     )
 
-    # Remove the table environment
-    latex_tabular = "\n".join(latex_tabular.split("\n")[1:-2])
+    # Removes lines before \begin{tabular} and after \end{tabular}
+    latex_tabular = "\n".join(
+        line
+        for line in latex_tabular.split("\n")
+        if "begin{table}" not in line and "end{table}" not in line
+    )
 
     with open(outfile, "w") as f:
         f.write(latex_tabular)
 
 
 def plot_perf(outfile, values, rows, cols):
-    if NOPLOT:
-        print_warning("Plotting disabled...")
+    if DRYRUN:
         return
     values["configuration"] = values["configuration"].replace(CFGS)
     fig, axes = plt.subplots(
@@ -543,6 +571,7 @@ def plot_perf(outfile, values, rows, cols):
     print_success(
         f"Plotted graph: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem}:individual"
     )
+    plt.close()
 
 
 def plot_perf_aggregate(outfile, values, width):
@@ -598,7 +627,7 @@ def plot_perf_bar(outfile, values, errs, width):
 
     plt.tight_layout()
     plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {EXPERIMENT}:{BIN}:perf:individual")
+    print_success(f"Plotted graph: {PROCESS_EXPERIMENT}:{BIN}:perf:individual")
 
 
 def plot_mem_bar(outfile, values, errs, width):
@@ -621,12 +650,11 @@ def plot_mem_bar(outfile, values, errs, width):
 
     plt.tight_layout()
     plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {EXPERIMENT}:{BIN}:mem")
+    print_success(f"Plotted graph: {PROCESS_EXPERIMENT}:{BIN}:mem")
 
 
 def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
-    if NOPLOT:
-        print_warning("Plotting disabled...")
+    if DRYRUN:
         return
     benchmarks["configuration"] = benchmarks["configuration"].replace(CFGS)
     fig, axes = plt.subplots(rows, cols, figsize=(16, 16))
@@ -715,6 +743,7 @@ def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
     print_success(
         f"Plotted graph: {outfile.parts[-4]}:{outfile.parts[-3]}:{outfile.stem}:profiles"
     )
+    plt.close()
 
 
 def parse_rt_metrics(dir):
@@ -831,12 +860,15 @@ def parse_results(expdir):
             print_warning(f"Skipping unknown file {prog}...")
             continue
 
+        if PROCESS_BENCHMARK and prog.name not in PROCESS_BENCHMARK:
+            continue
+
         data = Path(prog.path) / "data.csv"
 
         if not data.exists():
             print_error(f"No perf data found for {prog}")
             continue
-        perf = pd.read_csv(data, sep="\t", skiprows=4, index_col="suite")
+        perf = pd.read_csv(data, sep="\t", comment="#", index_col="suite")
         pexecs = int(perf["invocation"].max())
         if pexecs != PEXECS:
             print_error(
@@ -1023,63 +1055,107 @@ def process_summary(df):
     return gmean
 
 
-def process_perf(perf, experiment):
-    df = (
-        perf.groupby(["suite", "configuration", "benchmark"])["wallclock"]
+def process_perf(df, prog, experiment):
+    perf = (
+        df.groupby(["suite", "configuration", "benchmark"])["wallclock"]
         .apply(bootstrap_mean_ci)
         .unstack()
         .reset_index()
     )
 
-    return df
+    if perf["benchmark"].nunique() > 1:
+        stats = process_stats(perf, experiment)
+        write_stats(stats, experiment, fmt="perf")
 
-    # for row in gmean.itertuples():
-    #     s = row.suite.replace("-", "")
-    #     e = row.configuration.split("-")[0]
-    #     c = row.configuration.split("-")[1]
-    #     write_stat(f"\n% {row.suite} geomeans stats")
-    #     write_stat(f"\\newcommand\\{e}{c}{s}gmean{{{row.gmean:0.2f}\\xspace}}")
-    #     write_stat(
-    #         f"\\newcommand\\{e}{c}{s}gmeanci{{\\footnotesize{{±{max(row.gerr_lower,row.gerr_upper):0.3f}}}\\xspace}}"
-    #     )
+    plt = PLOT_DIR / experiment / prog / "perf.svg"
+    plt.parent.mkdir(parents=True, exist_ok=True)
 
-    # distinguishable = df[df["overlaps baseline"] != True]
-    # for s in df["suite"].unique():
-    #     write_stat(f"\n% {s} summary stats")
-    #     for c in df["configuration"].unique():
-    #         latex_name = experiment + s.replace("-", "") + c.split("-")[1]
-    #         write_stat(
-    #             f"\\newcommand\\{latex_name}best{{\\jake{{No statistically distinguishable best benchmark}}\\xspace}}"
-    #         )
-    #         write_stat(
-    #             f"\\newcommand\\{latex_name}worst{{\\jake{{No statistically distinguishable worst benchmark}}\\xspace}}"
-    #         )
-    #
-    #         cfg = df.loc[(df["suite"] == s) & (df["configuration"] == c)]
-    #
-    #         worst = df.iloc[df["value"].idxmax()]
-    #
-    #         print(worst)
-    #
+    plot_perf(
+        plt,
+        perf,
+        rows=perf["suite"].nunique(),
+        cols=1,
+    )
+    return perf
 
-    # pivot_df = df.pivot(index="benchmark", columns="configuration", values="value")
-    #
-    # # Calculate slowdown ratio (gcvs-gc / gcvs-arc)
-    # slowdown_series = pivot_df["gcvs-gc"] / pivot_df["gcvs-arc"]
-    #
-    # # Add the slowdown column only to gcvs-gc rows
-    # df["slowdown"] = np.nan
-    # df.loc[df["configuration"] == "gcvs-gc", "slowdown"] = df["benchmark"].map(
-    #     slowdown_series
-    # )
 
-    # data[data['configuration'] == BASELINE[suite]].iloc[0])
-    # for suite, data in df.groupby("suite"):
-    #     print(data)
-    #     for row in data.sort_values(by='value'):
-    #         print(row)
-    #     for row in data.loc[data.groupby('configuration')['value'].idxmin()].itertuples():
-    #         print(row)
+def process_mem(df, prog, experiment):
+    mem = (
+        df.copy()
+        .groupby(["suite", "configuration", "benchmark"])["mem"]
+        .apply(bootstrap_mean_ci)
+        .unstack()
+        .reset_index()
+    )
+
+    if mem["benchmark"].nunique() > 1:
+        stats = process_stats(mem, experiment)
+        write_stats(stats, experiment, fmt="mem")
+
+    for suite, results in df.groupby("suite"):
+        profile = PLOT_DIR / experiment / prog / "profiles" / f"{suite}.svg"
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        m = interpolate(normalize_time(results), oversampling=0.1)
+
+        bms = m["benchmark"].nunique()
+        if bms == 1:
+            rows = 1
+            cols = 1
+        else:
+            rows = 7
+            cols = 4
+        cmp = True if experiment in ["premopt", "elision"] else False
+        plot_mem_time_series(profile, m, rows, cols, cmp=cmp)
+    return mem
+
+
+# for row in gmean.itertuples():
+#     s = row.suite.replace("-", "")
+#     e = row.configuration.split("-")[0]
+#     c = row.configuration.split("-")[1]
+#     write_stat(f"\n% {row.suite} geomeans stats")
+#     write_stat(f"\\newcommand\\{e}{c}{s}gmean{{{row.gmean:0.2f}\\xspace}}")
+#     write_stat(
+#         f"\\newcommand\\{e}{c}{s}gmeanci{{\\footnotesize{{±{max(row.gerr_lower,row.gerr_upper):0.3f}}}\\xspace}}"
+#     )
+
+# distinguishable = df[df["overlaps baseline"] != True]
+# for s in df["suite"].unique():
+#     write_stat(f"\n% {s} summary stats")
+#     for c in df["configuration"].unique():
+#         latex_name = experiment + s.replace("-", "") + c.split("-")[1]
+#         write_stat(
+#             f"\\newcommand\\{latex_name}best{{\\jake{{No statistically distinguishable best benchmark}}\\xspace}}"
+#         )
+#         write_stat(
+#             f"\\newcommand\\{latex_name}worst{{\\jake{{No statistically distinguishable worst benchmark}}\\xspace}}"
+#         )
+#
+#         cfg = df.loc[(df["suite"] == s) & (df["configuration"] == c)]
+#
+#         worst = df.iloc[df["value"].idxmax()]
+#
+#         print(worst)
+#
+
+# pivot_df = df.pivot(index="benchmark", columns="configuration", values="value")
+#
+# # Calculate slowdown ratio (gcvs-gc / gcvs-arc)
+# slowdown_series = pivot_df["gcvs-gc"] / pivot_df["gcvs-arc"]
+#
+# # Add the slowdown column only to gcvs-gc rows
+# df["slowdown"] = np.nan
+# df.loc[df["configuration"] == "gcvs-gc", "slowdown"] = df["benchmark"].map(
+#     slowdown_series
+# )
+
+# data[data['configuration'] == BASELINE[suite]].iloc[0])
+# for suite, data in df.groupby("suite"):
+#     print(data)
+#     for row in data.sort_values(by='value'):
+#         print(row)
+#     for row in data.loc[data.groupby('configuration')['value'].idxmin()].itertuples():
+#         print(row)
 
 
 def process_conversion_stats(metrics):
@@ -1159,7 +1235,7 @@ def process_conversion_stats(metrics):
 
         s = suite.replace("-", "")
 
-        write_stat(f"\n% {suite} conversion stats")
+        write_stat(f"% Conversion statistics for {suite}")
         write_stat(f"\\newcommand\\{s}heapgcpct{{{pct_gc:.2f}\\%\\xspace}}")
         write_stat(f"\\newcommand\\{s}heapgctpct{{{pct_gt:.2f}\\%\\xspace}}")
         write_stat(f"\\newcommand\\{s}heapall{{{format_number(all)}\\xspace}}")
@@ -1264,132 +1340,48 @@ def process_gcvs():
             )
 
 
-def process_elision():
-    results = parse_results(RESULTS_DIR / "elision")
-    processed = {}
-    perfs = {}
-
-    for prog, (perf, mem, metrics) in results.items():
-        print_info(f"{prog}")
-
-        # m = process_rt_metrics(metrics)
-
-        print_warning("We made it")
-        p = process_perf(perf)
-        perf_graph = PLOT_DIR / "elision" / prog / "perf.svg"
-        perf_graph.parent.mkdir(parents=True, exist_ok=True)
-        # if p["benchmark"].nunique() != 1:
-        # Don't plot graphs for single benchmarks
-        plot_perf(
-            perf_graph,
-            p,
-            rows=p["suite"].nunique(),
-            cols=1,
-        )
-        for suite, results in mem.groupby("suite"):
-            profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
-            profile.parent.mkdir(parents=True, exist_ok=True)
-            m = interpolate(normalize_time(results), oversampling=0.1)
-
-            bms = m["benchmark"].nunique()
-            if bms == 1:
-                rows = 1
-                cols = 1
-            else:
-                rows = 7
-                cols = 4
-            plot_mem_time_series(profile, m, rows, cols, cmp=True)
-    # process_perf()
-    # RSS data tends to be an unreliable metric since it includes memory of
-    # shared libraries, heap, stack, and code segments. See [1]
-    #
-    # [1]: https://community.ibm.com/community/user/aiops/blogs/riley-zimmerman/2021/07/05/memory-measurements-part3
-    # rss = parse_sampler(resultsdir / "samples")
-    # rss = interpolate(normalize_time(rss))
-    # rss["configuration"] = rss["configuration"] + " rss"
-    # mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-    # mem = interpolate(normalize_time(mem), oversampling=0.1)
-    # plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
-    # add_gcvs_overview_entry()
-
-
-def process_premopt(experiment):
+def process_experiment(experiment):
+    print_info(f"Processing {experiment} results...")
     results = parse_results(RESULTS_DIR / experiment)
     perfs = []
     mems = []
 
     for prog, (perfraw, memraw, metrics) in results.items():
-        print_info(f"{prog}")
+        print_info(f"Processing {prog}...")
 
         if experiment == "gcvs":
             process_conversion_stats(metrics)
 
-        # PERF
-        perf = (
-            perfraw.groupby(["suite", "configuration", "benchmark"])["wallclock"]
-            .apply(bootstrap_mean_ci)
-            .unstack()
-            .reset_index()
-        )
-
-        if perf["benchmark"].nunique() > 1:
-            perf_stats = process_stats(perf, experiment)
-            write_stat(f"\n% {prog} {experiment} perf summary stats")
-            write_stats(perf_stats, experiment)
-
-        perf_graph = PLOT_DIR / experiment / prog / "perf.svg"
-        perf_graph.parent.mkdir(parents=True, exist_ok=True)
-
-        plot_perf(
-            perf_graph,
-            perf,
-            rows=perf["suite"].nunique(),
-            cols=1,
-        )
-
-        mem = (
-            memraw.copy()
-            .groupby(["suite", "configuration", "benchmark"])["mem"]
-            .apply(bootstrap_mean_ci, num_bootstraps=100)
-            .unstack()
-            .reset_index()
-        )
-
-        if perf["benchmark"].nunique() == 1:
-            perfs.append(perf.drop(columns=["benchmark"]))
-            mems.append(mem.drop(columns=["benchmark"]))
-        else:
-            perfs.append(process_summary(perf))
-            mems.append(process_summary(mem))
-
-        # MEM
-
-        for suite, results in memraw.groupby("suite"):
-            profile = PLOT_DIR / experiment / prog / "profiles" / f"{suite}.svg"
-            profile.parent.mkdir(parents=True, exist_ok=True)
-            m = interpolate(normalize_time(results), oversampling=0.1)
-
-            bms = m["benchmark"].nunique()
-            if bms == 1:
-                rows = 1
-                cols = 1
+        if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
+            perf = process_perf(perfraw, prog, experiment)
+            if perf["benchmark"].nunique() == 1:
+                perfs.append(perf.drop(columns=["benchmark"]))
             else:
-                rows = 7
-                cols = 4
-            cmp = True if experiment in ["premopt", "elision"] else False
-            plot_mem_time_series(profile, m, rows, cols, cmp=cmp)
+                perfs.append(process_summary(perf))
+        if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
+            mem = process_mem(memraw, prog, experiment)
+            if mem["benchmark"].nunique() == 1:
+                mems.append(mem.drop(columns=["benchmark"]))
+            else:
+                mems.append(process_summary(mem))
 
-    perfs = pd.concat(perfs, ignore_index=True)
-    perfs["suite"] = perfs["suite"].replace(SUITES)
-    perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
-    perfltx = perfs.pivot(index="suite", columns="configuration", values="latex_value")
-    write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
+    if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
+        perfs = pd.concat(perfs, ignore_index=True)
+        perfs["suite"] = perfs["suite"].replace(SUITES)
+        perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
+        perfltx = perfs.pivot(
+            index="suite", columns="configuration", values="latex_value"
+        )
+        write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
 
-    mems = pd.concat(mems, ignore_index=True)
-    mems["suite"] = mems["suite"].replace(SUITES)
-    mems["latex_value"] = mems.apply(format_mem_ci, axis=1)
-    memltx = mems.pivot(index="suite", columns="configuration", values="latex_value")
-    write_table(PLOT_DIR / experiment / "mem_summary.tex", memltx)
+    if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
+        mems = pd.concat(mems, ignore_index=True)
+        mems["suite"] = mems["suite"].replace(SUITES)
+        mems["latex_value"] = mems.apply(format_mem_ci, axis=1)
+        memltx = mems.pivot(
+            index="suite", columns="configuration", values="latex_value"
+        )
+        write_table(PLOT_DIR / experiment / "mem_summary.tex", memltx)
 
 
 def main():
@@ -1407,9 +1399,26 @@ def main():
         print_warning(f"File {STATS_FILE} already exists. Removing...")
         os.remove(STATS_FILE)
 
-    process_premopt("gcvs")
-    # process_premopt("premopt")
-    # process_premopt("elision")
+    if PROCESS_EXPERIMENT:
+        print_info(f"Only processing specified experiments: {PROCESS_EXPERIMENT}")
+
+    if PROCESS_BENCHMARK:
+        print_info(f"Only processing specified benchmarks: {PROCESS_BENCHMARK}")
+
+    if PROCESS_PLOT:
+        print_info(f"Only processing specified benchmarks: {PROCESS_PLOT}")
+
+    if DRYRUN:
+        print_warning(
+            f"DRYRUN enabled: no plots will be generated and CIs will be incorrect."
+        )
+
+    if not PROCESS_EXPERIMENT or "gcvs" in PROCESS_EXPERIMENT:
+        process_experiment("gcvs")
+    if not PROCESS_EXPERIMENT or "premopt" in PROCESS_EXPERIMENT:
+        process_experiment("premopt")
+    if not PROCESS_EXPERIMENT or "elision" in PROCESS_EXPERIMENT:
+        process_experiment("elision")
 
 
 if __name__ == "__main__":
