@@ -471,37 +471,43 @@ def write_stat(stat):
 
 
 def write_stats(df, experiment, fmt, summary=False):
-    ltxmap = {
-        "best": "best",
-        "worst": "worst",
-        "best_all": "bestsi",
-        "worst_all": "worstsi",
-        "diff_pct": "pct",
-    }
+    def ltxcmd(kind):
+        ltxmap = {
+            "best": "best",
+            "worst": "worst",
+            "best_all": "bestsi",
+            "worst_all": "worstsi",
+        }
+        return ltxmap[kind] if summary else ""
 
     ltxfmt = {"perf": lambda x: f"{x:0.2f}", "mem": format_bytes}
 
     df = df.fillna("")
 
-    for (suite, cfg), row in df.iterrows():
-        write_stat(f"% Config stats: {experiment}:{suite}:{cfg.split('-')[1]}:{fmt}")
-        latex_name = experiment + fmt + suite.replace("-", "")
+    for idx, row in df.iterrows():
         if not summary:
-            latex_name = latex_name + cfg.split("-")[1]
+            #     latex_name = experiment + fmt + idx.replace("-", "")
+            # else:
+            latex_name = (
+                experiment + fmt + idx[0].replace("-", "") + idx[1].split("-")[1]
+            )
+            write_stat(
+                f"% Config stats: {experiment}:{idx[0]}:{idx[1].split('-')[1]}:{fmt}"
+            )
         for (kind, name), value in row.items():
             if not value:
                 continue
             if name == "diff_pct":
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}pct{{{value:0.2f}\\%\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxcmd(kind)}pct{{{value:0.2f}\\%\\xspace}}"
                 )
-            elif name == "benchmark":
+            elif name == "benchmark" and not summary:
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}benchmark{{{ltxify(value)}\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxcmd(kind)}benchmark{{{ltxify(value)}\\xspace}}"
                 )
             elif name == "value":
                 write_stat(
-                    f"\\newcommand\\{latex_name}{ltxmap[kind]}value{{{ltxfmt[fmt](value)}\\xspace}}"
+                    f"\\newcommand\\{latex_name}{ltxcmd(kind)}value{{{ltxfmt[fmt](value)}\\xspace}}"
                 )
         write_stat("")
 
@@ -1367,6 +1373,8 @@ def process_experiment(experiment):
 
     if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
         perfs = pd.concat(perfs, ignore_index=True)
+        stats = process_stats(perfs, experiment, summary=True)
+        write_stats(stats, experiment, fmt="perf", summary=True)
         perfs["suite"] = perfs["suite"].replace(SUITES)
         perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
         perfltx = perfs.pivot(
@@ -1382,6 +1390,7 @@ def process_experiment(experiment):
             index="suite", columns="configuration", values="latex_value"
         )
         write_table(PLOT_DIR / experiment / "mem_summary.tex", memltx)
+        # write_stats(perfs, experiment, fmt="mem", summary=True)
 
 
 def main():
