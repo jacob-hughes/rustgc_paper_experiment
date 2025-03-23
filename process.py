@@ -478,7 +478,7 @@ def write_stats(df, experiment, fmt, summary=False):
             "best_all": "bestsi",
             "worst_all": "worstsi",
         }
-        return ltxmap[kind] if summary else ""
+        return ltxmap[kind] if not summary else ""
 
     ltxfmt = {"perf": lambda x: f"{x:0.2f}", "mem": format_bytes}
 
@@ -926,120 +926,80 @@ def process_stats(df, experiment, summary=False):
         values=["value", "ci", "lower", "upper"],
     )
 
-    worst = []
-    best = []
-    worst_all = []
-    best_all = []
+    def diff(a, b):
+        diff = a - b
+        ratio = a / b
+        pct = (ratio - 1) * 100
+        return {"diff_raw": diff, "diff_ratio": ratio, "diff_pct": pct}
 
-    for idx, row in pivot.iterrows():
-        suite = idx[0] if not summary else idx
-        baseline = BASELINE[suite] if experiment == "gcvs" else BASELINE[experiment]
-        for config in pivot["value"].columns:
-            value = row[("value", config)]
-            ci = row[("ci", config)]
-            lower = row[("lower", config)]
-            upper = row[("upper", config)]
+    def baseline(suite, data, col, lower, upper, kind):
+        bl = BASELINE[suite] if experiment == "gcvs" else BASELINE[experiment]
+        if col != bl:
+            # We compare the cfg with a common baseline
+            val = data[("value", bl)]
+            si = not (upper < data[("lower"), bl] or lower > data[("upper"), bl])
+        else:
+            others = data["value"].drop(col)
+            blidx = others.idxmin() if kind == "best" else others.idxmax()
+            val = data[("value", blidx)]
+            si = not (upper < data[("lower"), blidx] or lower > data[("upper"), blidx])
+        return (val, si)
 
-            if config == baseline:
-                others = row["value"].drop(config)
-                best_other = others.min()
-                worst_other = others.max()
+    def calculate_diffs():
+        worst = []
+        best = []
+        worst_all = []
+        best_all = []
+        for idx, row in pivot.iterrows():
+            suite = idx[0] if not summary else idx
+            for config in pivot["value"].columns:
+                value = row[("value", config)]
+                d = {
+                    "suite": suite,
+                    "configuration": config,
+                    "benchmark": idx[1],
+                    "value": value,
+                    "ci": row[("ci", config)],
+                }
 
-                best_config = others.idxmin()
-                best_other_lower = row[("lower", best_config)]
-                best_other_upper = row[("upper", best_config)]
+                lower = row[("lower", config)]
+                upper = row[("upper", config)]
 
-                worst_config = others.idxmax()
-                worst_other_lower = row[("lower", worst_config)]
-                worst_other_upper = row[("upper", worst_config)]
-            else:
-                # For non-baseline, compare with baseline
-                best_other = worst_other = row[("value", baseline)]
-                best_other_lower = worst_other_lower = row[("lower", baseline)]
-                best_other_upper = worst_other_upper = row[("upper", baseline)]
+                (best_other, best_si) = baseline(
+                    suite, row, config, lower, upper, "best"
+                )
+                (worst_other, worst_si) = baseline(
+                    suite, row, config, lower, upper, "worst"
+                )
 
-            worst_diff = value - best_other
-            best_diff = worst_other - value
-            slowdown = value / best_other
-            slowdown_pct = (slowdown - 1) * 100
-            speedup = worst_other / value
-            speedup_pct = (speedup - 1) * 100
+                worst_data = d | diff(value, best_other)
+                best_data = d | diff(worst_other, value)
 
-            worst_stat_indistinguishable = not (
-                upper < best_other_lower or lower > best_other_upper
-            )
-            best_stat_indistinguishable = not (
-                upper < worst_other_lower or lower > worst_other_upper
-            )
+                if not worst_si:
+                    worst.append(worst_data)
+                if not best_si:
+                    best.append(best_data)
 
-            worst_data = {
-                "suite": idx[0],
-                "configuration": config,
-                "diff_raw": worst_diff,
-                "diff_ratio": slowdown,
-                "diff_pct": slowdown_pct,
-                "value": value,
-                "ci": ci,
-            }
+                worst_all.append(worst_data)
+                best_all.append(best_data)
 
-            best_data = {
-                "suite": idx[0],
-                "configuration": config,
-                "diff_raw": best_diff,
-                "diff_ratio": speedup,
-                "diff_pct": speedup_pct,
-                "value": value,
-                "ci": ci,
-            }
-            if not summary:
-                worst_data["benchmark"] = idx[1]
-                best_data["benchmark"] = idx[1]
+        return {
+            "worst": pd.DataFrame(worst),
+            "best": pd.DataFrame(best),
+            "worst_all": pd.DataFrame(worst_all),
+            "best_all": pd.DataFrame(best_all),
+        }
 
-            worst_all.append(worst_data)
-            best_all.append(best_data)
-
-            if not worst_stat_indistinguishable:
-                worst.append(worst_data)
-
-            if not best_stat_indistinguishable:
-                best.append(best_data)
-
-    worst_df = pd.DataFrame(worst)
-    best_df = pd.DataFrame(best)
-    worst_all_df = pd.DataFrame(worst_all)
-    best_all_df = pd.DataFrame(best_all)
-
-    worst_df = (
-        worst_df.loc[
-            worst_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
-        ].set_index(["suite", "configuration"])
-        if not worst_df.empty
-        else pd.DataFrame()
-    )
-
-    best_df = (
-        best_df.loc[
-            best_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
-        ].set_index(["suite", "configuration"])
-        if not best_df.empty
-        else pd.DataFrame()
-    )
-
-    worst_all_df = worst_all_df.loc[
-        worst_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
-    ].set_index(["suite", "configuration"])
-
-    best_all_df = best_all_df.loc[
-        best_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
-    ].set_index(["suite", "configuration"])
-
-    # Concatenate DataFrames
     stats = pd.concat(
         {
-            "worst": worst_df,
-            "best": best_df,
-            "worst_all": worst_all_df,
-            "best_all": best_all_df,
+            k: (
+                v.loc[
+                    v.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+                ].set_index(["suite", "configuration"])
+                if not v.empty
+                else pd.DataFrame()
+            )
+            for k, v in calculate_diffs().items()
         },
         axis=1,
     )
@@ -1049,6 +1009,54 @@ def process_stats(df, experiment, summary=False):
     )
 
     return stats
+
+    # for k, v in stats.items():
+    #     print_info(k)
+    #     print(v)
+
+    # worst_df = (
+    #     worst_df.loc[
+    #         worst_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    #     ].set_index(["suite", "configuration"])
+    #     if not worst_df.empty
+    #     else pd.DataFrame()
+    # )
+    #
+    # best_df = (
+    #     best_df.loc[
+    #         best_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    #     ].set_index(["suite", "configuration"])
+    #     if not best_df.empty
+    #     else pd.DataFrame()
+    # )
+    #
+    # worst_all_df = worst_all_df.loc[
+    #     worst_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    # ].set_index(["suite", "configuration"])
+    #
+    # best_all_df = best_all_df.loc[
+    #     best_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    # ].set_index(["suite", "configuration"])
+
+    # print_info("worst all df")
+    # print(worst_all_df)
+    # print_info("best all df")
+    # print(best_all_df)
+    # print_info("worst df")
+    # print(worst_df)
+    # print_info("best df")
+    # print(best_df)
+
+    # Concatenate DataFrames
+    # stats = pd.concat(
+    #     {
+    #         "worst": worst_df,
+    #         "best": best_df,
+    #         "worst_all": worst_all_df,
+    #         "best_all": best_all_df,
+    #     },
+    #     axis=1,
+    # )
 
 
 def process_summary(df):
@@ -1373,8 +1381,8 @@ def process_experiment(experiment):
 
     if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
         perfs = pd.concat(perfs, ignore_index=True)
-        stats = process_stats(perfs, experiment, summary=True)
-        write_stats(stats, experiment, fmt="perf", summary=True)
+        # stats = process_stats(perfs, experiment, summary=True)
+        # write_stats(stats, experiment, fmt="perf", summary=True)
         perfs["suite"] = perfs["suite"].replace(SUITES)
         perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
         perfltx = perfs.pivot(
