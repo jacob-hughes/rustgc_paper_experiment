@@ -27,6 +27,7 @@ from matplotlib.ticker import FuncFormatter, ScalarFormatter
 from scipy import stats
 
 PLOT_DIR = None
+NOPLOT = True
 RESULTS_DIR = None
 STATS_FILE = None
 PEXECS = int(os.environ["PEXECS"])
@@ -173,7 +174,8 @@ BASELINE = {
     "som-rs-ast": "gcvs-rc",
     "som-rs-bc": "gcvs-rc",
     "grmtool": "gcvs-rc",
-    "binary-t": "gcvs-typed_arena",
+    "binary-t": "gcvs-arc",
+    "binary-trees": "gcvs-arc",
     "regex-redux": "gcvs-arc",
     "alacritty": "gcvs-arc",
     "fd": "gcvs-arc",
@@ -450,6 +452,35 @@ def write_stat(stat):
         f.write(stat + "\n")
 
 
+def write_stats(df, experiment, summary=False):
+    ltxmap = {
+        "best": "best",
+        "worst": "worst",
+        "best_all": "bestsi",
+        "worst_all": "worstsi",
+        "diff_pct": "pct",
+    }
+    for (suite, cfg), row in df.iterrows():
+        write_stat(f"\n% {suite} {cfg.split('-')[1]} perf summary stats")
+        latex_name = experiment + suite.replace("-", "") + cfg.split("-")[1]
+        print_info(latex_name)
+        for (kind, name), value in row.items():
+            if name == "diff_pct":
+                write_stat(
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}pct{{{value:0.2f}\\%}}\\xspace}}"
+                )
+            elif name == "benchmark":
+                write_stat(
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}benchmark{{{value}}}\\xspace}}"
+                )
+            elif name == "value":
+                write_stat(
+                    f"\\newcommand\\{latex_name}{ltxmap[kind]}value{{{value:0.2f}}}\\xspace}}"
+                )
+
+            print(kind, name, value)
+
+
 def write_table(outfile, df):
     latex_tabular = df.to_latex(
         index=True,
@@ -469,6 +500,9 @@ def write_table(outfile, df):
 
 
 def plot_perf(outfile, values, rows, cols):
+    if NOPLOT:
+        print_warning("Plotting disabled...")
+        return
     values["configuration"] = values["configuration"].replace(CFGS)
     fig, axes = plt.subplots(
         rows, cols, figsize=(PERF_PLOT_WIDTHS[outfile.parts[-2]], rows * 3)
@@ -591,6 +625,9 @@ def plot_mem_bar(outfile, values, errs, width):
 
 
 def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
+    if NOPLOT:
+        print_warning("Plotting disabled...")
+        return
     benchmarks["configuration"] = benchmarks["configuration"].replace(CFGS)
     fig, axes = plt.subplots(rows, cols, figsize=(16, 16))
     if rows * cols == 1:
@@ -837,7 +874,7 @@ def process_rt_metrics(metrics):
     return df
 
 
-def process_stats(df, baseline, summary=False):
+def process_stats(df, experiment, summary=False):
     df = df.copy()
     df["lower"] = df["value"] - df["ci"]
     df["upper"] = df["value"] + df["ci"]
@@ -857,6 +894,8 @@ def process_stats(df, baseline, summary=False):
     best_all = []
 
     for idx, row in pivot.iterrows():
+        suite = idx[0] if not summary else idx
+        baseline = BASELINE[suite] if experiment == "gcvs" else BASELINE[experiment]
         for config in pivot["value"].columns:
             value = row[("value", config)]
             ci = row[("ci", config)]
@@ -981,13 +1020,6 @@ def process_summary(df):
         .unstack()
         .reset_index()
     )
-    # gmean = gmean.rename(
-    #     columns={
-    #         "value": "gmean",
-    #         "ci_upper": "gerr_upper",
-    #         "ci_lower": "gerr_lower",
-    #     },
-    # )
     return gmean
 
 
@@ -1048,6 +1080,91 @@ def process_perf(perf, experiment):
     #         print(row)
     #     for row in data.loc[data.groupby('configuration')['value'].idxmin()].itertuples():
     #         print(row)
+
+
+def process_conversion_stats(metrics):
+    totals = (
+        metrics.groupby(["suite", "configuration", "benchmark"])
+        .mean(numeric_only=True)
+        .reset_index()
+        .drop(columns=["benchmark"])
+        .groupby(["suite", "configuration"])
+        .sum()
+        .reset_index()
+    )
+    conv = pd.DataFrame()
+
+    totals["pct_rc"] = pdiff(
+        totals["Arc allocated"] + totals["Rc allocated"], totals["allocations"]
+    )
+    totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
+    totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
+    totals["pct_managed"] = pdiff(totals["Gc reclaimed"], totals["allocations"])
+
+    cols = [
+        "suite",
+        "configuration",
+        "allocations",
+        "pct_rc",
+        "pct_gc",
+        "pct_managed",
+        "Gc reclaimed",
+    ]
+    # totals = totals[cols]
+    # totals = totals.set_index(['suite','configuration'])
+
+    for suite, data in totals.groupby("suite"):
+        rc_leaks = round(
+            totals[totals["configuration"] == BASELINE[suite]][
+                "leaked allocations"
+            ].iloc[0]
+        )
+        gc = data[data["configuration"] == "gcvs-gc"]
+        gc_leaks = gc["leaked allocations"].iloc[0]
+        all = gc["allocations"].iloc[0]
+        rcs = gc["Rc allocated"].iloc[0] + gc["Arc allocated"].iloc[0]
+        gcs = gc["Gc allocated"].iloc[0]
+        box_ctors = gc["Box allocated"].iloc[0]
+        num_swept = gc["Gc reclaimed"].iloc[0]
+        all = gc["allocations"].iloc[0]
+        finalizers_run = gc["finalizers completed"].iloc[0]
+        freg = gc["finalizers registered"].iloc[0]
+
+        # We use the difference between RC and GC leaks as a proxy for the
+        # number of 'GC' objects still on the heap (because Rc will
+        # deterministically drop on exit, whereas Gc will not). This is not
+        # hugely accurate, but will always serve as a 'lower bound'. There
+        # is however one case where we need to be a bit careful: benchmarks
+        # with cycles can cause large amounts of cyclic Rc garbage which
+        # can exceed the number of GC leaks. In such cases, we don't want
+        # to include this as it would cause us to erroneously think we
+        # converted fewer objects to GC than we had.
+        gc_leaks = max(gc["leaked allocations"].iloc[0] - rc_leaks, 0)
+
+        pct_gc = (gcs / all) * 100
+        gcs_trans = num_swept + gc_leaks + finalizers_run
+        pct_gt = (gcs_trans / all) * 100
+        print_info(f"{suite}")
+        print("finalizers run ", finalizers_run)
+        print("finalizers registered ", freg)
+        print_info(f"Total objects {format_number(all)}")
+        print_info(f"Box constructors {format_number(box_ctors)}")
+        print_info(f"Managed objects {format_number(gcs_trans)}")
+        print_info(f"RC leaks {format_number(rc_leaks)}")
+        print_info(f"GC leaks {format_number(gc_leaks)}")
+        print_info(f"GC constructors {format_number(gcs)}")
+        print_info(f"(a)RC constructors {format_number(rcs)}")
+        print_info(f"PCT managed: {pct_gt:.2f}")
+        print_info(f"PCT explicit GC:{pct_gc:.2f}")
+
+        s = suite.replace("-", "")
+
+        write_stat(f"\n% {suite} conversion stats")
+        write_stat(f"\\newcommand\\{s}heapgcpct{{{pct_gc:.2f}\\%\\xspace}}")
+        write_stat(f"\\newcommand\\{s}heapgctpct{{{pct_gt:.2f}\\%\\xspace}}")
+        write_stat(f"\\newcommand\\{s}heapall{{{format_number(all)}\\xspace}}")
+        write_stat(f"\\newcommand\\{s}heapgcs{{{format_number(gcs)}\\xspace}}")
+        write_stat(f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}")
 
 
 def process_gcvs():
@@ -1146,29 +1263,6 @@ def process_gcvs():
                 f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}"
             )
 
-        # p = process_perf(perf)
-        # perf_graph = PLOT_DIR / "gcvs" / prog / "perf.svg"
-        # perf_graph.parent.mkdir(parents=True, exist_ok=True)
-        # plot_perf(
-        #     perf_graph,
-        #     p,
-        #     rows=p["suite"].nunique(),
-        #     cols=1,
-        # )
-        # for suite, results in mem.groupby("suite"):
-        #     profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
-        #     profile.parent.mkdir(parents=True, exist_ok=True)
-        #     m = interpolate(normalize_time(results), oversampling=0.1)
-        #
-        #     bms = m["benchmark"].nunique()
-        #     if bms == 1:
-        #         rows = 1
-        #         cols = 1
-        #     else:
-        #         rows = 7
-        #         cols = 4
-        #     plot_mem_time_series(profile, m, rows, cols, cmp=False)
-
 
 def process_elision():
     results = parse_results(RESULTS_DIR / "elision")
@@ -1219,14 +1313,16 @@ def process_elision():
     # add_gcvs_overview_entry()
 
 
-def process_premopt():
-    results = parse_results(RESULTS_DIR / "premopt")
-    processed = {}
+def process_premopt(experiment):
+    results = parse_results(RESULTS_DIR / experiment)
     perfs = []
     mems = []
 
     for prog, (perfraw, memraw, metrics) in results.items():
         print_info(f"{prog}")
+
+        if experiment == "gcvs":
+            process_conversion_stats(metrics)
 
         # PERF
         perf = (
@@ -1235,9 +1331,13 @@ def process_premopt():
             .unstack()
             .reset_index()
         )
-        perf_stats = process_stats(perf, BASELINE["premopt"])
 
-        perf_graph = PLOT_DIR / "premopt" / prog / "perf.svg"
+        if perf["benchmark"].nunique() > 1:
+            perf_stats = process_stats(perf, experiment)
+            write_stat(f"\n% {prog} {experiment} perf summary stats")
+            write_stats(perf_stats, experiment)
+
+        perf_graph = PLOT_DIR / experiment / prog / "perf.svg"
         perf_graph.parent.mkdir(parents=True, exist_ok=True)
 
         plot_perf(
@@ -1264,8 +1364,8 @@ def process_premopt():
 
         # MEM
 
-        for suite, results in mem.groupby("suite"):
-            profile = PLOT_DIR / "premopt" / prog / "profiles" / f"{suite}.svg"
+        for suite, results in memraw.groupby("suite"):
+            profile = PLOT_DIR / experiment / prog / "profiles" / f"{suite}.svg"
             profile.parent.mkdir(parents=True, exist_ok=True)
             m = interpolate(normalize_time(results), oversampling=0.1)
 
@@ -1276,54 +1376,20 @@ def process_premopt():
             else:
                 rows = 7
                 cols = 4
-            # plot_mem_time_series(profile, m, rows, cols, cmp=True)
-    # process_perf()
-    # RSS data tends to be an unreliable metric since it includes memory of
-    # shared libraries, heap, stack, and code segments. See [1]
-    #
-    # [1]: https://community.ibm.com/community/user/aiops/blogs/riley-zimmerman/2021/07/05/memory-measurements-part3
-    # rss = parse_sampler(resultsdir / "samples")
-    # rss = interpolate(normalize_time(rss))
-    # rss["configuration"] = rss["configuration"] + " rss"
-    # mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-    # mem = interpolate(normalize_time(mem), oversampling=0.1)
-    # plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
-    # add_gcvs_overview_entry()
+            cmp = True if experiment in ["premopt", "elision"] else False
+            plot_mem_time_series(profile, m, rows, cols, cmp=cmp)
 
     perfs = pd.concat(perfs, ignore_index=True)
     perfs["suite"] = perfs["suite"].replace(SUITES)
     perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
     perfltx = perfs.pivot(index="suite", columns="configuration", values="latex_value")
-    write_table(PLOT_DIR / "premopt" / "perf_summary.tex", perfltx)
+    write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
 
     mems = pd.concat(mems, ignore_index=True)
     mems["suite"] = mems["suite"].replace(SUITES)
     mems["latex_value"] = mems.apply(format_mem_ci, axis=1)
     memltx = mems.pivot(index="suite", columns="configuration", values="latex_value")
-    write_table(PLOT_DIR / "premopt" / "mem_summary.tex", memltx)
-
-
-# def process_premopt():
-#     metrics = parse_metrics(RESULTS_DIR / "metrics")
-#
-#     # Basic sanity checking
-#     premopt = metrics[metrics["configuration"] == "premopt-opt"]
-#     naive = metrics[metrics["configuration"] == "premopt-naive"]
-#     none = metrics[metrics["configuration"] == "premopt-none"]
-#
-#     process_perf()
-#     mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-#     mem = interpolate(normalize_time(mem), oversampling=0.05)
-#     norm = normalize(mem, baseline_col="premopt-none")
-#     plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
-
-
-# def process_elision():
-#     process_perf()
-#     mem = parse_heaptrack(RESULTS_DIR / "heaptrack")
-#     mem = interpolate(normalize_time(mem), oversampling=0.05)
-#     norm = normalize(mem, baseline_col="elision-naive")
-#     plot_mem_time_series(PLOT_DIR / "profiles", norm, 7, 4, cmp=True)
+    write_table(PLOT_DIR / experiment / "mem_summary.tex", memltx)
 
 
 def main():
@@ -1341,22 +1407,9 @@ def main():
         print_warning(f"File {STATS_FILE} already exists. Removing...")
         os.remove(STATS_FILE)
 
-    # process_gcvs()
-    process_premopt()
-    # process_elision()
-
-    # if not os.path.exists(RESULTS_DIR / "perf.csv") and not os.path.exists(
-    #     RESULTS_DIR / "mem.csv"
-    # ):
-    #     print_error(f"No data found for {EXPERIMENT}:{BIN}.")
-    #     sys.exit()
-    #
-    # if EXPERIMENT == "gcvs":
-    #     process_gcvs()
-    # elif EXPERIMENT == "premopt":
-    #     process_premopt()
-    # elif EXPERIMENT == "elision":
-    #     process_elision()
+    process_premopt("gcvs")
+    # process_premopt("premopt")
+    # process_premopt("elision")
 
 
 if __name__ == "__main__":
