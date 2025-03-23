@@ -79,6 +79,23 @@ def format_number(number):
     return f"{number:.1f}{suffixes[magnitude]}".replace(".0", "")
 
 
+def format_bytes(number):
+    suffixes = ["B", "KiB", "MiB", "GiB", "TiB"]
+    magnitude = 0
+    while abs(number) >= 1000 and magnitude < len(suffixes) - 1:
+        number /= 1000.0
+        magnitude += 1
+    return f"{number:.2f}{suffixes[magnitude]}".replace(".00", "")
+
+
+def format_value_ci(row):
+    return f"{row['value']:.2f} \\footnotesize{{± {row['ci']:.3f}}}"
+
+
+def format_mem_ci(row):
+    return f"{format_bytes(row['value'])} \\footnotesize{{± {format_bytes(row['ci'])}}}"
+
+
 # ============== PLOT FORMATTING =================
 
 matplotlib.use("Agg")
@@ -121,6 +138,10 @@ SUITES = {
     "som-rs-ast": r"\somrsast",
     "som-rs-bc": r"\somrsbc",
     "yksom": r"\yksom",
+    "grmtools": r"\grmtools",
+    "binary-trees": r"\binarytrees",
+    "binary-t": r"\binarytrees",  # it's a mem error
+    "regex-redux": r"\regexredux",
 }
 
 CFGS = {
@@ -157,6 +178,8 @@ BASELINE = {
     "alacritty": "gcvs-arc",
     "fd": "gcvs-arc",
     "ripgrep": "gcvs-arc",
+    "premopt": "premopt-none",
+    "elision": "elision-naive",
 }
 
 PERF_PLOT_WIDTHS = {
@@ -425,6 +448,24 @@ def interpolate(df, oversampling=1):
 def write_stat(stat):
     with open(STATS_FILE, "a") as f:
         f.write(stat + "\n")
+
+
+def write_table(outfile, df):
+    latex_tabular = df.to_latex(
+        index=True,
+        escape=False,
+        column_format="l" + "r" * len(df.columns),
+        caption=None,
+        label=None,
+        header=True,
+        position=None,
+    )
+
+    # Remove the table environment
+    latex_tabular = "\n".join(latex_tabular.split("\n")[1:-2])
+
+    with open(outfile, "w") as f:
+        f.write(latex_tabular)
 
 
 def plot_perf(outfile, values, rows, cols):
@@ -796,55 +837,217 @@ def process_rt_metrics(metrics):
     return df
 
 
-def process_perf(perf):
+def process_stats(df, baseline, summary=False):
+    df = df.copy()
+    df["lower"] = df["value"] - df["ci"]
+    df["upper"] = df["value"] + df["ci"]
+    if summary:
+        index = "suite"
+    else:
+        index = ["suite", "benchmark"]
+    pivot = df.pivot_table(
+        index=index,
+        columns="configuration",
+        values=["value", "ci", "lower", "upper"],
+    )
+
+    worst = []
+    best = []
+    worst_all = []
+    best_all = []
+
+    for idx, row in pivot.iterrows():
+        for config in pivot["value"].columns:
+            value = row[("value", config)]
+            ci = row[("ci", config)]
+            lower = row[("lower", config)]
+            upper = row[("upper", config)]
+
+            if config == baseline:
+                others = row["value"].drop(config)
+                best_other = others.min()
+                worst_other = others.max()
+
+                best_config = others.idxmin()
+                best_other_lower = row[("lower", best_config)]
+                best_other_upper = row[("upper", best_config)]
+
+                worst_config = others.idxmax()
+                worst_other_lower = row[("lower", worst_config)]
+                worst_other_upper = row[("upper", worst_config)]
+            else:
+                # For non-baseline, compare with baseline
+                best_other = worst_other = row[("value", baseline)]
+                best_other_lower = worst_other_lower = row[("lower", baseline)]
+                best_other_upper = worst_other_upper = row[("upper", baseline)]
+
+            worst_diff = value - best_other
+            best_diff = worst_other - value
+            slowdown = value / best_other
+            slowdown_pct = (slowdown - 1) * 100
+            speedup = worst_other / value
+            speedup_pct = (speedup - 1) * 100
+
+            worst_stat_indistinguishable = not (
+                upper < best_other_lower or lower > best_other_upper
+            )
+            best_stat_indistinguishable = not (
+                upper < worst_other_lower or lower > worst_other_upper
+            )
+
+            worst_data = {
+                "suite": idx[0],
+                "configuration": config,
+                "diff_raw": worst_diff,
+                "diff_ratio": slowdown,
+                "diff_pct": slowdown_pct,
+                "value": value,
+                "ci": ci,
+            }
+
+            best_data = {
+                "suite": idx[0],
+                "configuration": config,
+                "diff_raw": best_diff,
+                "diff_ratio": speedup,
+                "diff_pct": speedup_pct,
+                "value": value,
+                "ci": ci,
+            }
+            if not summary:
+                worst_data["benchmark"] = idx[1]
+                best_data["benchmark"] = idx[1]
+
+            worst_all.append(worst_data)
+            best_all.append(best_data)
+
+            if not worst_stat_indistinguishable:
+                worst.append(worst_data)
+
+            if not best_stat_indistinguishable:
+                best.append(best_data)
+
+    worst_df = pd.DataFrame(worst)
+    best_df = pd.DataFrame(best)
+    worst_all_df = pd.DataFrame(worst_all)
+    best_all_df = pd.DataFrame(best_all)
+
+    worst_df = (
+        worst_df.loc[
+            worst_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+        ].set_index(["suite", "configuration"])
+        if not worst_df.empty
+        else pd.DataFrame()
+    )
+
+    best_df = (
+        best_df.loc[
+            best_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+        ].set_index(["suite", "configuration"])
+        if not best_df.empty
+        else pd.DataFrame()
+    )
+
+    worst_all_df = worst_all_df.loc[
+        worst_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    ].set_index(["suite", "configuration"])
+
+    best_all_df = best_all_df.loc[
+        best_all_df.groupby(["suite", "configuration"])["diff_raw"].idxmax()
+    ].set_index(["suite", "configuration"])
+
+    # Concatenate DataFrames
+    stats = pd.concat(
+        {
+            "worst": worst_df,
+            "best": best_df,
+            "worst_all": worst_all_df,
+            "best_all": best_all_df,
+        },
+        axis=1,
+    )
+
+    stats.columns = pd.MultiIndex.from_tuples(
+        [(col[0], col[1]) for col in stats.columns]
+    )
+
+    return stats
+
+
+def process_summary(df):
+    gmean = (
+        df.groupby(["suite", "configuration"])["value"]
+        .apply(bootstrap_geomean_ci, symmetric=True)
+        .unstack()
+        .reset_index()
+    )
+    # gmean = gmean.rename(
+    #     columns={
+    #         "value": "gmean",
+    #         "ci_upper": "gerr_upper",
+    #         "ci_lower": "gerr_lower",
+    #     },
+    # )
+    return gmean
+
+
+def process_perf(perf, experiment):
     df = (
         perf.groupby(["suite", "configuration", "benchmark"])["wallclock"]
         .apply(bootstrap_mean_ci)
         .unstack()
         .reset_index()
     )
-    if perf["benchmark"].nunique() == 1:
-        return df
 
-    pivot_df = df.pivot(index="benchmark", columns="configuration", values="value")
+    return df
 
-    # Calculate slowdown ratio (gcvs-gc / gcvs-arc)
-    slowdown_series = pivot_df["gcvs-gc"] / pivot_df["gcvs-arc"]
+    # for row in gmean.itertuples():
+    #     s = row.suite.replace("-", "")
+    #     e = row.configuration.split("-")[0]
+    #     c = row.configuration.split("-")[1]
+    #     write_stat(f"\n% {row.suite} geomeans stats")
+    #     write_stat(f"\\newcommand\\{e}{c}{s}gmean{{{row.gmean:0.2f}\\xspace}}")
+    #     write_stat(
+    #         f"\\newcommand\\{e}{c}{s}gmeanci{{\\footnotesize{{±{max(row.gerr_lower,row.gerr_upper):0.3f}}}\\xspace}}"
+    #     )
 
-    # Add the slowdown column only to gcvs-gc rows
-    df["slowdown"] = np.nan
-    df.loc[df["configuration"] == "gcvs-gc", "slowdown"] = df["benchmark"].map(
-        slowdown_series
-    )
+    # distinguishable = df[df["overlaps baseline"] != True]
+    # for s in df["suite"].unique():
+    #     write_stat(f"\n% {s} summary stats")
+    #     for c in df["configuration"].unique():
+    #         latex_name = experiment + s.replace("-", "") + c.split("-")[1]
+    #         write_stat(
+    #             f"\\newcommand\\{latex_name}best{{\\jake{{No statistically distinguishable best benchmark}}\\xspace}}"
+    #         )
+    #         write_stat(
+    #             f"\\newcommand\\{latex_name}worst{{\\jake{{No statistically distinguishable worst benchmark}}\\xspace}}"
+    #         )
+    #
+    #         cfg = df.loc[(df["suite"] == s) & (df["configuration"] == c)]
+    #
+    #         worst = df.iloc[df["value"].idxmax()]
+    #
+    #         print(worst)
+    #
+
+    # pivot_df = df.pivot(index="benchmark", columns="configuration", values="value")
+    #
+    # # Calculate slowdown ratio (gcvs-gc / gcvs-arc)
+    # slowdown_series = pivot_df["gcvs-gc"] / pivot_df["gcvs-arc"]
+    #
+    # # Add the slowdown column only to gcvs-gc rows
+    # df["slowdown"] = np.nan
+    # df.loc[df["configuration"] == "gcvs-gc", "slowdown"] = df["benchmark"].map(
+    #     slowdown_series
+    # )
 
     # data[data['configuration'] == BASELINE[suite]].iloc[0])
-    for suite, data in df.groupby("suite"):
-        print(data)
+    # for suite, data in df.groupby("suite"):
+    #     print(data)
     #     for row in data.sort_values(by='value'):
     #         print(row)
     #     for row in data.loc[data.groupby('configuration')['value'].idxmin()].itertuples():
     #         print(row)
-
-    gmean = (
-        df.groupby(["suite", "configuration"])["value"]
-        .apply(bootstrap_geomean_ci)
-        .unstack()
-        .reset_index()
-    )
-    gmean = gmean.rename(
-        columns={
-            "value": "gmean",
-            "ci_upper": "gerr_upper",
-            "ci_lower": "gerr_lower",
-        },
-    )
-    for row in gmean.itertuples():
-        s = row.suite.replace("-", "")
-        e = row.configuration.split("-")[0]
-        c = row.configuration.split("-")[1]
-        write_stat(f"\\newcommand\\{e}{c}{s}gmean{{{row.gmean:0.2f}\\xspace}}")
-
-    return df.merge(gmean, on=["suite", "configuration"])
 
 
 def process_gcvs():
@@ -943,15 +1146,15 @@ def process_gcvs():
                 f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}"
             )
 
-        p = process_perf(perf)
-        perf_graph = PLOT_DIR / "gcvs" / prog / "perf.svg"
-        perf_graph.parent.mkdir(parents=True, exist_ok=True)
-        plot_perf(
-            perf_graph,
-            p,
-            rows=p["suite"].nunique(),
-            cols=1,
-        )
+        # p = process_perf(perf)
+        # perf_graph = PLOT_DIR / "gcvs" / prog / "perf.svg"
+        # perf_graph.parent.mkdir(parents=True, exist_ok=True)
+        # plot_perf(
+        #     perf_graph,
+        #     p,
+        #     rows=p["suite"].nunique(),
+        #     cols=1,
+        # )
         # for suite, results in mem.groupby("suite"):
         #     profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
         #     profile.parent.mkdir(parents=True, exist_ok=True)
@@ -977,6 +1180,7 @@ def process_elision():
 
         # m = process_rt_metrics(metrics)
 
+        print_warning("We made it")
         p = process_perf(perf)
         perf_graph = PLOT_DIR / "elision" / prog / "perf.svg"
         perf_graph.parent.mkdir(parents=True, exist_ok=True)
@@ -1018,35 +1222,61 @@ def process_elision():
 def process_premopt():
     results = parse_results(RESULTS_DIR / "premopt")
     processed = {}
-    perfs = {}
+    perfs = []
+    mems = []
 
-    for prog, (perf, mem, metrics) in results.items():
+    for prog, (perfraw, memraw, metrics) in results.items():
         print_info(f"{prog}")
 
-        p = process_perf(perf)
+        # PERF
+        perf = (
+            perfraw.groupby(["suite", "configuration", "benchmark"])["wallclock"]
+            .apply(bootstrap_mean_ci)
+            .unstack()
+            .reset_index()
+        )
+        perf_stats = process_stats(perf, BASELINE["premopt"])
+
         perf_graph = PLOT_DIR / "premopt" / prog / "perf.svg"
         perf_graph.parent.mkdir(parents=True, exist_ok=True)
-        # if p["benchmark"].nunique() != 1:
-        # Don't plot graphs for single benchmarks
+
         plot_perf(
             perf_graph,
-            p,
-            rows=p["suite"].nunique(),
+            perf,
+            rows=perf["suite"].nunique(),
             cols=1,
         )
-        # for suite, results in mem.groupby("suite"):
-        #     profile = PLOT_DIR / "gcvs" / prog / "profiles" / f"{suite}.svg"
-        #     profile.parent.mkdir(parents=True, exist_ok=True)
-        #     m = interpolate(normalize_time(results), oversampling=0.1)
-        #
-        #     bms = m["benchmark"].nunique()
-        #     if bms == 1:
-        #         rows = 1
-        #         cols = 1
-        #     else:
-        #         rows = 7
-        #         cols = 4
-        #     plot_mem_time_series(profile, m, rows, cols, cmp=False)
+
+        mem = (
+            memraw.copy()
+            .groupby(["suite", "configuration", "benchmark"])["mem"]
+            .apply(bootstrap_mean_ci, num_bootstraps=100)
+            .unstack()
+            .reset_index()
+        )
+
+        if perf["benchmark"].nunique() == 1:
+            perfs.append(perf.drop(columns=["benchmark"]))
+            mems.append(mem.drop(columns=["benchmark"]))
+        else:
+            perfs.append(process_summary(perf))
+            mems.append(process_summary(mem))
+
+        # MEM
+
+        for suite, results in mem.groupby("suite"):
+            profile = PLOT_DIR / "premopt" / prog / "profiles" / f"{suite}.svg"
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            m = interpolate(normalize_time(results), oversampling=0.1)
+
+            bms = m["benchmark"].nunique()
+            if bms == 1:
+                rows = 1
+                cols = 1
+            else:
+                rows = 7
+                cols = 4
+            # plot_mem_time_series(profile, m, rows, cols, cmp=True)
     # process_perf()
     # RSS data tends to be an unreliable metric since it includes memory of
     # shared libraries, heap, stack, and code segments. See [1]
@@ -1059,6 +1289,18 @@ def process_premopt():
     # mem = interpolate(normalize_time(mem), oversampling=0.1)
     # plot_mem_time_series(PLOT_DIR / "profiles.svg", mem, 7, 4)
     # add_gcvs_overview_entry()
+
+    perfs = pd.concat(perfs, ignore_index=True)
+    perfs["suite"] = perfs["suite"].replace(SUITES)
+    perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
+    perfltx = perfs.pivot(index="suite", columns="configuration", values="latex_value")
+    write_table(PLOT_DIR / "premopt" / "perf_summary.tex", perfltx)
+
+    mems = pd.concat(mems, ignore_index=True)
+    mems["suite"] = mems["suite"].replace(SUITES)
+    mems["latex_value"] = mems.apply(format_mem_ci, axis=1)
+    memltx = mems.pivot(index="suite", columns="configuration", values="latex_value")
+    write_table(PLOT_DIR / "premopt" / "mem_summary.tex", memltx)
 
 
 # def process_premopt():
@@ -1099,8 +1341,8 @@ def main():
         print_warning(f"File {STATS_FILE} already exists. Removing...")
         os.remove(STATS_FILE)
 
-    process_gcvs()
-    # process_premopt()
+    # process_gcvs()
+    process_premopt()
     # process_elision()
 
     # if not os.path.exists(RESULTS_DIR / "perf.csv") and not os.path.exists(
