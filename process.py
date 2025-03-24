@@ -34,6 +34,7 @@ PEXECS = int(os.environ["PEXECS"])
 PROCESS_EXPERIMENT = os.environ.get("PROCESS_EXPERIMENT", "").split()
 PROCESS_BENCHMARK = os.environ.get("PROCESS_BENCHMARK", "").split()
 PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "perf mem").split()
+BOOTSTRAP = os.environ.get("DRYRUN", "false") in ["true", "on", "1", "yes"]
 Z = 2.576  # 99% interval
 
 # ============== HELPERS ================
@@ -240,6 +241,7 @@ def bootstrap(
     values, kind, method, num_bootstraps=10000, confidence=0.99, symmetric=True
 ):
 
+
     if DRYRUN:
         # This should never be used for real, but it's useful to prevent things
         # taking forever when trying to quickly debug the script
@@ -281,7 +283,7 @@ def bootstrap(
     return pd.Series(data)
 
 
-def bootstrap_geomean_ci(means, num_bootstraps=10000, confidence=0.99, symmetric=False):
+def bootstrap_geomean_ci(means, num_bootstraps=10000, confidence=0.99, symmetric=True):
     # We use the BCa (bias-corrected and accelerated) bootstrap method. This
     # can provide more accurate CIs over the more straightforward percentile
     # method but it is more computationally expensive -- though this doesn't
@@ -299,7 +301,10 @@ def bootstrap_geomean_ci(means, num_bootstraps=10000, confidence=0.99, symmetric
     return bootstrap(means, stats.gmean, method, num_bootstraps, confidence, symmetric)
 
 
-def bootstrap_mean_ci(raw_data, num_bootstraps=10000, confidence=0.99):
+def arith_mean_ci(raw_data, num_bootstraps=10000, confidence=0.99, pexecs=PEXECS):
+    if not BOOTSTRAP:
+        ci_inl(raw_data, pexecs)
+
     return bootstrap(
         raw_data, np.mean, "percentile", num_bootstraps, confidence, symmetric=True
     )
@@ -456,7 +461,7 @@ def interpolate(df, oversampling=1):
     mean_memory, mean_ci = aggregate(
         df.groupby(["configuration", "benchmark"]),
         "mem",
-        bootstrap_mean_ci,
+        arith_mean_ci,
         unstack=True,
     )
     mean_memory = mean_memory.unstack().reset_index()
@@ -766,10 +771,9 @@ def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
     plt.close()
 
 
-def parse_rt_metrics(dir):
+def parse_rt_metrics(dir, kind):
     files = glob.glob(f"{dir / "runtime"}/*.csv")
     data = []
-    mem_summary = []
     for f in files:
         flags = (
             pd.read_csv(f, usecols=[0, 1, 2])
@@ -812,9 +816,14 @@ def parse_rt_metrics(dir):
         df["benchmark"] = base[3]
         data.append(df)
 
-    df_mt = pd.concat(data, ignore_index=True)
-    df_ht = parse_ht_summary(dir)
-    return df_mt.merge(df_ht, on=["suite", "configuration", "benchmark", "pexec"])
+    if not data:
+        return pd.DataFrame()
+
+    df = pd.concat(data, ignore_index=True)
+    if kind == "perf":
+        return df
+
+    return parse_ht_summary(dir).merge(df, on=["suite", "configuration", "benchmark", "pexec"])
 
 
 def parse_ht_summary(dir):
@@ -829,7 +838,11 @@ def parse_ht_summary(dir):
         df["benchmark"] = base[3]
         df = df.drop(columns=["temporary allocations"])
         data.append(df)
+
+    if not data:
+        return pd.DataFrame()
     return pd.concat(data, ignore_index=True)
+
 
 
 def parse_heaptrack(dir):
@@ -885,33 +898,16 @@ def parse_results(expdir):
 
         data = Path(prog.path) / "perf.csv"
 
-        if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
-            if not data.exists():
-                print_error(f"No perf data found for {prog}")
-                continue
-            perf = pd.read_csv(data, sep="\t", comment="#", index_col="suite")
-            pexecs = int(perf["invocation"].max())
-            if pexecs != PEXECS:
-                print_error(
-                    f"{prog} perf data contains incorrect number of process executions. Skipping.."
-                )
-                perf = []
-                perf_metrics = []
-            else:
-                # perf = perf[perf["executor"].str.endswith("perf")]
-                # perf["executor"] = perf["executor"].str.removesuffix("-perf")
-                perf = perf[perf["criterion"] == "total"].rename(
-                    columns={"value": "wallclock", "executor": "configuration"}
-                )
-                perf = perf[["benchmark", "configuration", "wallclock"]]
-                perf_metrics = parse_rt_metrics(Path(prog.path) / "perf" / "metrics")
+        perf = pd.read_csv(data, sep="\t", comment="#", index_col="suite")
+        pexecs = int(perf["invocation"].max())
+        perf = perf[perf["criterion"] == "total"].rename(
+            columns={"value": "wallclock", "executor": "configuration"}
+        )
+        perf = perf[["benchmark", "configuration", "wallclock"]]
+        perf_metrics = parse_rt_metrics(Path(prog.path) / "perf" / "metrics", kind = 'perf')
 
-        if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
-            mem = parse_heaptrack(Path(prog.path) / "heaptrack")
-            mem_metrics = parse_rt_metrics(Path(prog.path) / "mem" / "metrics")
-        else:
-            mem = []
-            mem_metrics = []
+        mem = parse_heaptrack(Path(prog.path) / "heaptrack")
+        mem_metrics = parse_rt_metrics(Path(prog.path) / "mem" / "metrics", kind = 'mem')
 
         results[prog.name] = (perf, mem, perf_metrics, mem_metrics)
     return results
@@ -1093,7 +1089,7 @@ def process_stats(df, experiment, summary=False):
 def process_summary(df):
     gmean = (
         df.groupby(["suite", "configuration"])["value"]
-        .apply(bootstrap_geomean_ci, symmetric=True)
+        .apply(bootstrap_geomean_ci)
         .unstack()
         .reset_index()
     )
@@ -1101,9 +1097,10 @@ def process_summary(df):
 
 
 def process_perf(df, prog, experiment):
+    pexecs = df.groupby(["suite", "configuration", "benchmark"]).size().max()
     perf = (
         df.groupby(["suite", "configuration", "benchmark"])["wallclock"]
-        .apply(bootstrap_mean_ci)
+        .apply(arith_mean_ci, pexecs=pexecs)
         .unstack()
         .reset_index()
     )
@@ -1125,10 +1122,12 @@ def process_perf(df, prog, experiment):
 
 
 def process_mem(df, prog, experiment):
+    pexecs = df.groupby(["suite", "configuration", "benchmark"]).size().max()
+    print(pexecs)
     mem = (
         df.copy()
         .groupby(["suite", "configuration", "benchmark"])["mem"]
-        .apply(bootstrap_mean_ci)
+        .apply(arith_mean_ci)
         .unstack()
         .reset_index()
     )
@@ -1288,38 +1287,45 @@ def process_experiment(experiment):
     perfs = []
     mems = []
 
+    def sanity_check(prog, df):
+        if df.empty:
+            print_error(f'{experiment}:{prog} has missing data')
+            return False
+        runs = df.groupby(['suite','configuration','benchmark']).size()
+        if (runs != runs.iloc[0]).all():
+            print_error(f'{experiment}:{prog} has an inconsistent number of pexecs: {pruns}')
+            return False
+        return True
+
     for prog, (perfraw, memraw, perfmetrics, memmetrics) in results.items():
         print_info(f"Processing {prog}...")
 
-        if experiment == "gcvs":
-            if "mem" in PROCESS_PLOT and memmetrics:
-                process_conversion_stats(memmetrics)
-            elif "perf" in PROCESS_PLOT and perfmetrics:
-                print_warning(f"No gcvs mem metrics found for {prog.name}")
-                print_warning(
-                    f"Conversion stats will be less accurate as they will not have access to heaptrack data."
-                )
-                process_conversion_stats(perfmetrics)
-            else:
-                print_warning(f"No gcvs metrics found for {prog.name}")
-                print_warning(
-                    f"Conversion stats will not be added to experiment_stats.tex"
-                )
+        perfs_ok = "perf" in PROCESS_PLOT and sanity_check(prog, perfraw)
+        perfms_ok = "perf" in PROCESS_PLOT and sanity_check(prog, perfmetrics)
+        mems_ok = "mem" in PROCESS_PLOT and sanity_check(prog, memraw)
+        memms_ok = "mem" in PROCESS_PLOT and sanity_check(prog, memmetrics)
 
-        if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
+
+        if experiment == "gcvs":
+            if memms_ok:
+                print_warning(f"Processing conversion stats")
+                process_conversion_stats(memmetrics)
+
+        if perfs_ok:
             perf = process_perf(perfraw, prog, experiment)
             if perf["benchmark"].nunique() == 1:
                 perfs.append(perf.drop(columns=["benchmark"]))
             else:
                 perfs.append(process_summary(perf))
-        if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
+
+        if mems_ok:
             mem = process_mem(memraw, prog, experiment)
             if mem["benchmark"].nunique() == 1:
                 mems.append(mem.drop(columns=["benchmark"]))
             else:
                 mems.append(process_summary(mem))
 
-    if "perf" in PROCESS_PLOT:
+    if perfs_ok:
         perfs = pd.concat(perfs, ignore_index=True)
         stats = process_stats(perfs, experiment, summary=True)
         write_stats(stats, experiment, fmt="perf", summary=True)
@@ -1332,7 +1338,7 @@ def process_experiment(experiment):
         perfltx = perfltx.fillna("-")
         write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
 
-    if "mem" in PROCESS_PLOT:
+    if mems_ok:
         mems = pd.concat(mems, ignore_index=True)
         stats = process_stats(mems, experiment, summary=True)
         write_stats(stats, experiment, fmt="mem", summary=True)
@@ -1376,11 +1382,16 @@ def main():
             f"DRYRUN enabled: no plots will be generated and CIs will be incorrect."
         )
 
-    if not PROCESS_EXPERIMENT or "gcvs" in PROCESS_EXPERIMENT:
+    if not BOOTSTRAP:
+        print_warning(
+            f"BOOTSTRAP disabled: CI formula will be used for arith. mean"
+        )
+
+    if "gcvs" in PROCESS_EXPERIMENT:
         process_experiment("gcvs")
-    if not PROCESS_EXPERIMENT or "premopt" in PROCESS_EXPERIMENT:
+    if "premopt" in PROCESS_EXPERIMENT:
         process_experiment("premopt")
-    if not PROCESS_EXPERIMENT or "elision" in PROCESS_EXPERIMENT:
+    if "elision" in PROCESS_EXPERIMENT:
         process_experiment("elision")
 
 
