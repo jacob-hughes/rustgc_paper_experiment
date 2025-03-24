@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/env bash
 
 CFG=$1
 INVOCATION=$2
