@@ -1,6 +1,6 @@
 export PEXECS ?= 10
 export BENCHMARKS ?= som grmtools alacritty fd regex-redux binary-trees ripgrep
-export EXPERIMENTS = gcvs premopt elision
+export EXPERIMENTS ?= gcvs premopt elision
 export METRICS ?= perf mem
 
 PWD != pwd

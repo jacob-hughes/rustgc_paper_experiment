@@ -31,9 +31,9 @@ DRYRUN = os.environ.get("DRYRUN", "false") in ["true", "on", "1", "yes"]
 RESULTS_DIR = None
 STATS_FILE = None
 PEXECS = int(os.environ["PEXECS"])
-PROCESS_EXPERIMENT = os.environ.get("PROCESS_EXPERIMENT", "").split()
-PROCESS_BENCHMARK = os.environ.get("PROCESS_BENCHMARK", "").split()
-PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "perf mem").split()
+EXPERIMENTS = os.environ.get("EXPERIMENTS", "").split()
+BENCHMARKS = os.environ.get("BENCHMARKS", "").split()
+PLOTS = os.environ.get("METRICS", "").split()
 BOOTSTRAP = os.environ.get("DRYRUN", "false") in ["true", "on", "1", "yes"]
 Z = 2.576  # 99% interval
 
@@ -108,6 +108,13 @@ def format_value_ci(row):
     return s
 
 
+def format_value_ci_asym(row):
+    if math.isnan(row["ci"]):
+        return "-"
+    s = f"row['value']:.2f row['ci']"
+    return s
+
+
 def format_mem_ci(row):
     return f"{format_bytes(row['value'])} \\footnotesize{{± {format_bytes(row['ci'])}}}"
 
@@ -144,15 +151,10 @@ matplotlib.rcParams.update(
     }
 )
 
-PROCESS_EXPERIMENTS = {
-    "gcrc": r"GcRc",
-    "elision": r"Elision",
-    "premopt": r"PremOpt",
-}
-
 SUITES = {
     "som-rs-ast": r"\somrsast",
     "som-rs-bc": r"\somrsbc",
+    "alacritty": r"\alacritty",
     "yksom": r"\yksom",
     "grmtools": r"\grmtools",
     "binary-trees": r"\binarytrees",
@@ -178,16 +180,16 @@ CFGS = {
     "elision-opt": "Elision Opt",
 }
 
-METRICS = {
-    "finalizers registered": "Finalizable Objects",
-    "finalizers completed": "Total Finalized",
-    "barriers visited": "Barrier Chokepoints",
-    "Gc allocated": "Allocations (Gc)",
-    "Box allocated": "Allocations (Box)",
-    "Rc alocated": "Allocations (Rc)",
-    "Arc allocated": "Allocations (Arc)",
-    "STW pauses": r"Gc Cycles",
-}
+# METRICS = {
+#     "finalizers registered": "Finalizable Objects",
+#     "finalizers completed": "Total Finalized",
+#     "barriers visited": "Barrier Chokepoints",
+#     "Gc allocated": "Allocations (Gc)",
+#     "Box allocated": "Allocations (Box)",
+#     "Rc alocated": "Allocations (Rc)",
+#     "Arc allocated": "Allocations (Arc)",
+#     "STW pauses": r"Gc Cycles",
+# }
 
 BASELINE = {
     "som-rs-ast": "gcvs-rc",
@@ -241,7 +243,6 @@ def bootstrap(
     values, kind, method, num_bootstraps=10000, confidence=0.99, symmetric=True
 ):
 
-
     if DRYRUN:
         # This should never be used for real, but it's useful to prevent things
         # taking forever when trying to quickly debug the script
@@ -276,9 +277,10 @@ def bootstrap(
     else:
         data = {
             "value": value,
-            "ci_lower": res.confidence_interval.low,
-            "ci_upper": res.confidence_interval.high,
+            "lower": res.confidence_interval.low,
+            "upper": res.confidence_interval.high,
         }
+        print(data)
 
     return pd.Series(data)
 
@@ -528,8 +530,14 @@ def write_stats(df, experiment, fmt, summary=False):
         write_stat("")
 
 
-def write_table(outfile, df):
-    latex_tabular = df.to_latex(
+def write_table(outfile, df, include_html=True):
+    ltxtable = df.pivot(
+        index="suite",
+        columns="configuration",
+        values="latex_value",
+    ).fillna("-")
+
+    latex_tabular = ltxtable.to_latex(
         index=True,
         escape=False,
         column_format="l" + "r" * len(df.columns),
@@ -538,8 +546,23 @@ def write_table(outfile, df):
         header=True,
         position=None,
     )
+    print(ltxtable)
 
-    df = df.fillna("-")
+    # df = print(df.drop(columns={"latex_value"}))
+
+    # Assuming your DataFrame is called 'df'
+    # result = (
+    #     df.drop(columns={"latex_value"})
+    #     .groupby("configuration")
+    #     .agg(
+    #         {
+    #             "Elision Naive": lambda x: f"{x['value']} ± {x['ci']}",
+    #             "Elision Opt": lambda x: f"{x['value']} ± {x['ci']}",
+    #         }
+    #     )
+    # )
+
+    # df = df.fillna("-")
 
     # Removes lines before \begin{tabular} and after \end{tabular}
     latex_tabular = "\n".join(
@@ -550,6 +573,10 @@ def write_table(outfile, df):
 
     with open(outfile, "w") as f:
         f.write(latex_tabular)
+
+    print_success(
+        f"Plotted table: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem.replace('_',':')}"
+    )
 
 
 def plot_perf(outfile, values, rows, cols):
@@ -634,48 +661,6 @@ def plot_perf_aggregate(outfile, values, width):
     print_success(
         f"Plotted graph: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem}:individual"
     )
-
-
-def plot_perf_bar(outfile, values, errs, width):
-    fig, ax = plt.subplots(figsize=(width, 3))
-    values = values.copy().rename(columns=CFGS)
-    errs = errs.rename(columns=CFGS)
-    values.plot(kind="bar", ax=ax, width=0.8, yerr=errs)
-
-    formatter = ScalarFormatter()
-    formatter.set_scientific(False)
-    ax.legend().set_title(None)
-    ax.set_xticklabels(values.index, rotation=45, ha="right")
-    ax.set_ylabel("Wall-clock time (ms)\n(lower is better)")
-    ax.xaxis.label.set_visible(False)
-    ax.yaxis.set_major_formatter(formatter)
-
-    plt.tight_layout()
-    plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {PROCESS_EXPERIMENT}:{BIN}:perf:individual")
-
-
-def plot_mem_bar(outfile, values, errs, width):
-    fig, ax = plt.subplots(figsize=(width, 4))
-    values = values.rename(columns=CFGS)
-    errs = errs.rename(columns=CFGS)
-    means = values.drop(["peak_heap_usage"], axis=1)
-    means_errs = errs.drop(["peak_heap_usage_ci"], axis=1)
-    peaks = values.drop(["mean_heap_usage"], axis=1)
-    peaks_errs = errs.drop(["mean_heap_usage_ci"], axis=1)
-    means.plot(kind="bar", ax=ax, alpha=0.3, width=0.8, hatch="///", yerr=means_errs)
-    peaks.plot(kind="bar", ax=ax, width=0.8, alpha=0.6, yerr=peaks_errs)
-    formatter, unit = bytes_formatter(np.max(values["peak_heap_usage"].max()))
-
-    ax.legend().set_title(None)
-    ax.set_xticklabels(values.index, rotation=45, ha="right")
-    ax.set_ylabel(f"Memory Usage ({unit}s)")
-    ax.xaxis.label.set_visible(False)
-    ax.yaxis.set_major_formatter(formatter)
-
-    plt.tight_layout()
-    plt.savefig(outfile, format="svg", bbox_inches="tight")
-    print_success(f"Plotted graph: {PROCESS_EXPERIMENT}:{BIN}:mem")
 
 
 def plot_mem_time_series(outfile, benchmarks, rows, cols, cmp=False):
@@ -823,7 +808,9 @@ def parse_rt_metrics(dir, kind):
     if kind == "perf":
         return df
 
-    return parse_ht_summary(dir).merge(df, on=["suite", "configuration", "benchmark", "pexec"])
+    return parse_ht_summary(dir).merge(
+        df, on=["suite", "configuration", "benchmark", "pexec"]
+    )
 
 
 def parse_ht_summary(dir):
@@ -842,7 +829,6 @@ def parse_ht_summary(dir):
     if not data:
         return pd.DataFrame()
     return pd.concat(data, ignore_index=True)
-
 
 
 def parse_heaptrack(dir):
@@ -893,7 +879,7 @@ def parse_results(expdir):
             print_warning(f"Skipping unknown file {prog}...")
             continue
 
-        if PROCESS_BENCHMARK and prog.name not in PROCESS_BENCHMARK:
+        if prog.name not in BENCHMARKS:
             continue
 
         data = Path(prog.path) / "perf.csv"
@@ -904,10 +890,12 @@ def parse_results(expdir):
             columns={"value": "wallclock", "executor": "configuration"}
         )
         perf = perf[["benchmark", "configuration", "wallclock"]]
-        perf_metrics = parse_rt_metrics(Path(prog.path) / "perf" / "metrics", kind = 'perf')
+        perf_metrics = parse_rt_metrics(
+            Path(prog.path) / "perf" / "metrics", kind="perf"
+        )
 
         mem = parse_heaptrack(Path(prog.path) / "heaptrack")
-        mem_metrics = parse_rt_metrics(Path(prog.path) / "mem" / "metrics", kind = 'mem')
+        mem_metrics = parse_rt_metrics(Path(prog.path) / "mem" / "metrics", kind="mem")
 
         results[prog.name] = (perf, mem, perf_metrics, mem_metrics)
     return results
@@ -1089,7 +1077,7 @@ def process_stats(df, experiment, summary=False):
 def process_summary(df):
     gmean = (
         df.groupby(["suite", "configuration"])["value"]
-        .apply(bootstrap_geomean_ci)
+        .apply(bootstrap_geomean_ci, symmetric=False)
         .unstack()
         .reset_index()
     )
@@ -1289,22 +1277,23 @@ def process_experiment(experiment):
 
     def sanity_check(prog, df):
         if df.empty:
-            print_error(f'{experiment}:{prog} has missing data')
+            print_error(f"{experiment}:{prog} has missing data")
             return False
-        runs = df.groupby(['suite','configuration','benchmark']).size()
+        runs = df.groupby(["suite", "configuration", "benchmark"]).size()
         if (runs != runs.iloc[0]).all():
-            print_error(f'{experiment}:{prog} has an inconsistent number of pexecs: {pruns}')
+            print_error(
+                f"{experiment}:{prog} has an inconsistent number of pexecs: {pruns}"
+            )
             return False
         return True
 
     for prog, (perfraw, memraw, perfmetrics, memmetrics) in results.items():
         print_info(f"Processing {prog}...")
 
-        perfs_ok = "perf" in PROCESS_PLOT and sanity_check(prog, perfraw)
-        perfms_ok = "perf" in PROCESS_PLOT and sanity_check(prog, perfmetrics)
-        mems_ok = "mem" in PROCESS_PLOT and sanity_check(prog, memraw)
-        memms_ok = "mem" in PROCESS_PLOT and sanity_check(prog, memmetrics)
-
+        perfs_ok = "perf" in PLOTS and sanity_check(prog, perfraw)
+        perfms_ok = "perf" in PLOTS and sanity_check(prog, perfmetrics)
+        mems_ok = "mem" in PLOTS and sanity_check(prog, memraw)
+        memms_ok = "mem" in PLOTS and sanity_check(prog, memmetrics)
 
         if experiment == "gcvs":
             if memms_ok:
@@ -1332,11 +1321,8 @@ def process_experiment(experiment):
         perfs["suite"] = perfs["suite"].replace(SUITES)
         perfs["configuration"] = perfs["configuration"].replace(CFGS)
         perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
-        perfltx = perfs.pivot(
-            index="suite", columns="configuration", values="latex_value"
-        )
-        perfltx = perfltx.fillna("-")
-        write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
+        perfs["value_ci"] = perfs.apply(format_value_ci, axis=1)
+        write_table(PLOT_DIR / experiment / "perf_summary.tex", perfs)
 
     if mems_ok:
         mems = pd.concat(mems, ignore_index=True)
@@ -1368,14 +1354,9 @@ def main():
         print_warning(f"File {STATS_FILE} already exists. Removing...")
         os.remove(STATS_FILE)
 
-    if PROCESS_EXPERIMENT:
-        print_info(f"Only processing specified experiments: {PROCESS_EXPERIMENT}")
-
-    if PROCESS_BENCHMARK:
-        print_info(f"Only processing specified benchmarks: {PROCESS_BENCHMARK}")
-
-    if len(PROCESS_PLOT) != 2:
-        print_info(f"Only processing specified benchmarks: {PROCESS_PLOT}")
+    print_info(f"Will process the the following experiments: {EXPERIMENTS}")
+    print_info(f"Will process the the following benchmarks: {BENCHMARKS}")
+    print_info(f"Will generate the the following plots: {PLOTS}")
 
     if DRYRUN:
         print_warning(
@@ -1383,16 +1364,16 @@ def main():
         )
 
     if not BOOTSTRAP:
-        print_warning(
-            f"BOOTSTRAP disabled: CI formula will be used for arith. mean"
-        )
+        print_warning(f"BOOTSTRAP disabled: CI formula will be used for arith. mean")
 
-    if "gcvs" in PROCESS_EXPERIMENT:
-        process_experiment("gcvs")
-    if "premopt" in PROCESS_EXPERIMENT:
-        process_experiment("premopt")
-    if "elision" in PROCESS_EXPERIMENT:
-        process_experiment("elision")
+    for e in EXPERIMENTS:
+        process_experiment(e)
+    # if "gcvs" in EXPERIMENTS:
+    #     process_experiment("gcvs")
+    # if "premopt" in PROCESS_EXPERIMENT:
+    #     process_experiment("premopt")
+    # if "elision" in PROCESS_EXPERIMENT:
+    #     process_experiment("elision")
 
 
 if __name__ == "__main__":
