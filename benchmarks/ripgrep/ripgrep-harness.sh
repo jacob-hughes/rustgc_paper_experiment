@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/env bash
 export PATH="$(dirname $0)/:$PATH"
 CMD_DIR="benchmarks/ripgrep/commands"
 LINUX="benchmarks/ripgrep/linux"
