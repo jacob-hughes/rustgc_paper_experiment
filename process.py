@@ -36,7 +36,7 @@ PROCESS_BENCHMARK = os.environ.get("PROCESS_BENCHMARK", "").split()
 PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "").split()
 Z = 2.576  # 99% interval
 
-# ============== HELPERS =================
+# ============== HELPERS ================
 
 
 def print_success(message):
@@ -98,10 +98,12 @@ def ltxify(s):
 
 
 def format_value_ci(row):
-    dryrun = "\\jake{{This comment has been automatically inserted to warn you that the CIs were generated with the DRYRUN flag, reducing their bootstrap iterations to only 100. You definitely don't want this and left it in accidentally.}}"
+    if math.isnan(row["ci"]):
+        return "-"
+    # dryrun = "\\jake{{This comment has been automatically inserted to warn you that the CIs were generated with the DRYRUN flag, reducing their bootstrap iterations to only 100. You definitely don't want this and left it in accidentally.}}"
     s = f"{row['value']:.2f} \\footnotesize{{± {row['ci']:.3f}}}"
-    if DRYRUN:
-        s = s + dryrun
+    # if DRYRUN:
+    #     s = s + dryrun
     return s
 
 
@@ -154,7 +156,10 @@ SUITES = {
     "grmtools": r"\grmtools",
     "binary-trees": r"\binarytrees",
     "binary-t": r"\binarytrees",  # it's a mem error
+    "grmtool": r"\grmtools",  # it's a mem error
     "regex-redux": r"\regexredux",
+    "ripgrep": r"\ripgrep",
+    "fd": r"\fd",
 }
 
 CFGS = {
@@ -162,6 +167,7 @@ CFGS = {
     "gcvs-rc": "RC",
     "gcvs-arc": "ARC",
     "gcvs-typed-arena": "Typed Arena",
+    "gcvs-typed_arena": "Typed Arena",
     "gcvs-rust-gc": "Rust-GC",
     "premopt-opt": "Barriers Opt",
     "premopt-naive": "Barriers Naive",
@@ -478,16 +484,17 @@ def write_stats(df, experiment, fmt, summary=False):
             "best_all": "bestsi",
             "worst_all": "worstsi",
         }
-        return ltxmap[kind] if not summary else ""
+        return ltxmap[kind]
 
     ltxfmt = {"perf": lambda x: f"{x:0.2f}", "mem": format_bytes}
 
     df = df.fillna("")
 
     for idx, row in df.iterrows():
-        if not summary:
-            #     latex_name = experiment + fmt + idx.replace("-", "")
-            # else:
+        if summary:
+            write_stat(f"% Summary stats: {experiment}:{idx}:{fmt}")
+            latex_name = experiment + fmt + idx.split("-")[1]
+        else:
             latex_name = (
                 experiment + fmt + idx[0].replace("-", "") + idx[1].split("-")[1]
             )
@@ -504,6 +511,10 @@ def write_stats(df, experiment, fmt, summary=False):
             elif name == "benchmark" and not summary:
                 write_stat(
                     f"\\newcommand\\{latex_name}{ltxcmd(kind)}benchmark{{{ltxify(value)}\\xspace}}"
+                )
+            elif name == "suite" and summary:
+                write_stat(
+                    f"\\newcommand\\{latex_name}{ltxcmd(kind)}suite{{{SUITES[value]}\\xspace}}"
                 )
             elif name == "value":
                 write_stat(
@@ -523,6 +534,8 @@ def write_table(outfile, df):
         position=None,
     )
 
+    df = df.fillna("-")
+
     # Removes lines before \begin{tabular} and after \end{tabular}
     latex_tabular = "\n".join(
         line
@@ -537,7 +550,8 @@ def write_table(outfile, df):
 def plot_perf(outfile, values, rows, cols):
     if DRYRUN:
         return
-    values["configuration"] = values["configuration"].replace(CFGS)
+    values = values.copy().rename(columns=CFGS)
+    # values["configuration"] = values["configuration"].replace(CFGS)
     fig, axes = plt.subplots(
         rows, cols, figsize=(PERF_PLOT_WIDTHS[outfile.parts[-2]], rows * 3)
     )
@@ -619,7 +633,7 @@ def plot_perf_aggregate(outfile, values, width):
 
 def plot_perf_bar(outfile, values, errs, width):
     fig, ax = plt.subplots(figsize=(width, 3))
-    values = values.rename(columns=CFGS)
+    values = values.copy().rename(columns=CFGS)
     errs = errs.rename(columns=CFGS)
     values.plot(kind="bar", ax=ax, width=0.8, yerr=errs)
 
@@ -913,18 +927,6 @@ def process_rt_metrics(metrics):
 
 
 def process_stats(df, experiment, summary=False):
-    df = df.copy()
-    df["lower"] = df["value"] - df["ci"]
-    df["upper"] = df["value"] + df["ci"]
-    if summary:
-        index = "suite"
-    else:
-        index = ["suite", "benchmark"]
-    pivot = df.pivot_table(
-        index=index,
-        columns="configuration",
-        values=["value", "ci", "lower", "upper"],
-    )
 
     def diff(a, b):
         diff = a - b
@@ -945,22 +947,24 @@ def process_stats(df, experiment, summary=False):
             si = not (upper < data[("lower"), blidx] or lower > data[("upper"), blidx])
         return (val, si)
 
-    def calculate_diffs():
+    def calculate_diffs(df):
         worst = []
         best = []
         worst_all = []
         best_all = []
-        for idx, row in pivot.iterrows():
+        for idx, row in df.iterrows():
             suite = idx[0] if not summary else idx
-            for config in pivot["value"].columns:
+            for config in df["value"].columns:
                 value = row[("value", config)]
                 d = {
                     "suite": suite,
                     "configuration": config,
-                    "benchmark": idx[1],
                     "value": value,
                     "ci": row[("ci", config)],
                 }
+
+                if not summary:
+                    d["benchmark"] = idx[1]
 
                 lower = row[("lower", config)]
                 upper = row[("upper", config)]
@@ -990,16 +994,33 @@ def process_stats(df, experiment, summary=False):
             "best_all": pd.DataFrame(best_all),
         }
 
+    df = df.copy()
+    df["lower"] = df["value"] - df["ci"]
+    df["upper"] = df["value"] + df["ci"]
+    if summary:
+        index = "suite"
+    else:
+        index = ["suite", "benchmark"]
+    pivot = df.pivot_table(
+        index=index,
+        columns="configuration",
+        values=["value", "ci", "lower", "upper"],
+    )
+
+    diffs = calculate_diffs(pivot)
+    if summary:
+        statidx = "configuration"
+    else:
+        statidx = ["suite", "configuration"]
+
     stats = pd.concat(
         {
             k: (
-                v.loc[
-                    v.groupby(["suite", "configuration"])["diff_raw"].idxmax()
-                ].set_index(["suite", "configuration"])
+                v.loc[v.groupby(statidx)["diff_raw"].idxmax()].set_index(statidx)
                 if not v.empty
                 else pd.DataFrame()
             )
-            for k, v in calculate_diffs().items()
+            for k, v in diffs.items()
         },
         axis=1,
     )
@@ -1191,15 +1212,6 @@ def process_conversion_stats(metrics):
     totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
     totals["pct_managed"] = pdiff(totals["Gc reclaimed"], totals["allocations"])
 
-    cols = [
-        "suite",
-        "configuration",
-        "allocations",
-        "pct_rc",
-        "pct_gc",
-        "pct_managed",
-        "Gc reclaimed",
-    ]
     # totals = totals[cols]
     # totals = totals.set_index(['suite','configuration'])
 
@@ -1219,6 +1231,7 @@ def process_conversion_stats(metrics):
         all = gc["allocations"].iloc[0]
         finalizers_run = gc["finalizers completed"].iloc[0]
         freg = gc["finalizers registered"].iloc[0]
+        elided = gc["finalizers elidable"].iloc[0]
 
         # We use the difference between RC and GC leaks as a proxy for the
         # number of 'GC' objects still on the heap (because Rc will
@@ -1235,8 +1248,10 @@ def process_conversion_stats(metrics):
         gcs_trans = num_swept + gc_leaks + finalizers_run
         pct_gt = (gcs_trans / all) * 100
         print_info(f"{suite}")
-        print("finalizers run ", finalizers_run)
-        print("finalizers registered ", freg)
+        print_info(f"F reg: {format_number(freg)}")
+        print_info(f"F run: {format_number(finalizers_run)}")
+        print_info(f"F eli: {format_number(elided)}")
+        print("finalizers registered {format_number(freg)}")
         print_info(f"Total objects {format_number(all)}")
         print_info(f"Box constructors {format_number(box_ctors)}")
         print_info(f"Managed objects {format_number(gcs_trans)}")
@@ -1381,24 +1396,30 @@ def process_experiment(experiment):
 
     if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
         perfs = pd.concat(perfs, ignore_index=True)
-        # stats = process_stats(perfs, experiment, summary=True)
-        # write_stats(stats, experiment, fmt="perf", summary=True)
+        stats = process_stats(perfs, experiment, summary=True)
+        write_stats(stats, experiment, fmt="perf", summary=True)
         perfs["suite"] = perfs["suite"].replace(SUITES)
+        perfs["configuration"] = perfs["configuration"].replace(CFGS)
         perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
         perfltx = perfs.pivot(
             index="suite", columns="configuration", values="latex_value"
         )
+        perfltx = perfltx.fillna("-")
         write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
 
     if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
         mems = pd.concat(mems, ignore_index=True)
+        stats = process_stats(mems, experiment, summary=True)
+        write_stats(stats, experiment, fmt="mem", summary=True)
+        print(mems.isna().any())
         mems["suite"] = mems["suite"].replace(SUITES)
+        mems["configuration"] = mems["configuration"].replace(CFGS)
         mems["latex_value"] = mems.apply(format_mem_ci, axis=1)
         memltx = mems.pivot(
             index="suite", columns="configuration", values="latex_value"
         )
+        memltx = memltx.fillna("-")
         write_table(PLOT_DIR / experiment / "mem_summary.tex", memltx)
-        # write_stats(perfs, experiment, fmt="mem", summary=True)
 
 
 def main():
