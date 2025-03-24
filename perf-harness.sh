@@ -7,6 +7,10 @@ BIN=$4
 BENCHMARK=$5
 shift 5
 
+OUTDIR="$(pwd)/results/$EXPERIMENT/$BENCHMARK_SUITE/perf/metrics"
+LOGFILE="$BIN.$INVOCATION.$EXPERIMENT-$CFG.$BENCHMARK.csv"
+export ALLOY_LOG="$OUTDIR/runtime/$LOGFILE"
+
 if [ "$EXPERIMENT" == "gcvs" ] && [ "$CFG" != "gc" ]; then
     export GC_DONT_GC=true
 fi

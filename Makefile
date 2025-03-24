@@ -1,4 +1,7 @@
 export PEXECS ?= 10
+export BENCHMARKS ?= som grmtools alacritty fd regex-redux binary-trees ripgrep
+export EXPERIMENTS = gcvs premopt elision
+export METRICS ?= perf mem
 
 PWD != pwd
 
@@ -25,18 +28,15 @@ HEAPTRACK_VERSION = master
 HEAPTRACK_SRC = $(PWD)/heaptrack
 HEAPTRACK = $(HEAPTRACK_SRC)/bin
 
-BENCHMARKS = ripgrep fd alacritty
-# BENCHMARKS = som grmtools alacritty fd regex-redux binary-trees ripgrep
-# BENCHMARKS = regex-redux
-# BENCHMARKS = som grmtools binary-trees grmtools
 BENCHMARK_DIRS := $(addprefix $(PWD)/benchmarks/, $(BENCHMARKS))
 
 export RESULTS_DIR = $(PWD)/results
 
-export EXPERIMENTS = gcvs premopt elision
 RESULTS := $(foreach e,$(EXPERIMENTS),$(foreach b,$(BENCHMARKS),$(e)/$(b)))
-RESULTS := $(addprefix $(RESULTS_DIR)/, $(addsuffix /data.csv, $(RESULTS)))
+PERF_RESULTS := $(foreach r,$(RESULTS),$(foreach m,$(METRICS),$(r)/$(m).csv))
+PERF_RESULTS := $(addprefix $(RESULTS_DIR)/, $(PERF_RESULTS))
 
+RESULTS := $(addprefix $(RESULTS_DIR)/, $(addsuffix /data.csv, $(RESULTS)))
 export ALLOY_PATH = $(ALLOY_SRC)/bin
 export LIBGC_PATH = $(LIBGC_SRC)/lib
 export REBENCH_EXEC = $(VENV)/bin/rebench
@@ -94,17 +94,35 @@ $(HEAPTRACK): $(HEAPTRACK_SRC)
 build: build-alloy
 	$(foreach b, $(BENCHMARK_DIRS), cd $(b)/ && make build;)
 
-bench: venv $(RESULTS)
+# bench: venv $(RESULTS)
+bench: $(PERF_RESULTS)
 
-$(RESULTS_DIR)/%/data.csv:
-	@echo $*
-	mkdir -p $(dir $@)metrics/runtime
-	mkdir -p $(dir $@)metrics/heaptrack
-	mkdir -p $(dir $@)metrics/rss
+$(RESULTS_DIR)/%.csv:
+	mkdir -p $(basename $@)/metrics/runtime
+	mkdir -p $(dir $@)heaptrack
 	- $(REBENCH_EXEC) -R -D \
 		--invocations $(PEXECS) \
 		--iterations 1 \
-		-df $@ $(PWD)/rebench.conf $(subst /,-,$*)
+		-df $@ $(PWD)/rebench_$(notdir $*).conf $(subst /,-,$(patsubst %/,%,$(dir $*)))
+
+# $(RESULTS_DIR)/%/data.csv:
+# 	@echo $*
+# 	mkdir -p $(dir $@)metrics/runtime
+# 	mkdir -p $(dir $@)metrics/heaptrack
+# 	mkdir -p $(dir $@)metrics/rss
+# 	- $(REBENCH_EXEC) -R -D \
+# 		--invocations $(PEXECS) \
+# 		--iterations 1 \
+# 		-df $@ $(PWD)/rebench.conf $(subst /,-,$*)
+#
+
+# $(RESULTS_DIR)/%/perf.csv:
+# 	@echo $*
+# 	mkdir -p $(dir $@)perf/metrics/runtime
+# 	- $(REBENCH_EXEC) -R -D \
+# 		--invocations $(PEXECS) \
+# 		--iterations 1 \
+# 		-df $@ $(PWD)/rebench_perf.conf $(subst /,-,$*)
 
 plot: venv
 	$(REBENCH_PROCESSOR) $(PLOTS_DIR) $(RESULTS_DIR)
