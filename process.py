@@ -33,7 +33,7 @@ STATS_FILE = None
 PEXECS = int(os.environ["PEXECS"])
 PROCESS_EXPERIMENT = os.environ.get("PROCESS_EXPERIMENT", "").split()
 PROCESS_BENCHMARK = os.environ.get("PROCESS_BENCHMARK", "").split()
-PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "").split()
+PROCESS_PLOT = os.environ.get("PROCESS_PLOT", "perf mem").split()
 Z = 2.576  # 99% interval
 
 # ============== HELPERS ================
@@ -883,27 +883,37 @@ def parse_results(expdir):
         if PROCESS_BENCHMARK and prog.name not in PROCESS_BENCHMARK:
             continue
 
-        data = Path(prog.path) / "data.csv"
+        data = Path(prog.path) / "perf.csv"
 
-        if not data.exists():
-            print_error(f"No perf data found for {prog}")
-            continue
-        perf = pd.read_csv(data, sep="\t", comment="#", index_col="suite")
-        pexecs = int(perf["invocation"].max())
-        if pexecs != PEXECS:
-            print_error(
-                f"{prog} perf data contains incorrect number of process executions. Skipping.."
-            )
-            continue
-        perf = perf[perf["executor"].str.endswith("perf")]
-        perf["executor"] = perf["executor"].str.removesuffix("-perf")
-        perf = perf[perf["criterion"] == "total"].rename(
-            columns={"value": "wallclock", "executor": "configuration"}
-        )
-        perf = perf[["benchmark", "configuration", "wallclock"]]
-        mem = parse_heaptrack(Path(prog.path) / "metrics" / "heaptrack")
-        metrics = parse_rt_metrics(Path(prog.path) / "metrics")
-        results[prog.name] = (perf, mem, metrics)
+        if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
+            if not data.exists():
+                print_error(f"No perf data found for {prog}")
+                continue
+            perf = pd.read_csv(data, sep="\t", comment="#", index_col="suite")
+            pexecs = int(perf["invocation"].max())
+            if pexecs != PEXECS:
+                print_error(
+                    f"{prog} perf data contains incorrect number of process executions. Skipping.."
+                )
+                perf = []
+                perf_metrics = []
+            else:
+                # perf = perf[perf["executor"].str.endswith("perf")]
+                # perf["executor"] = perf["executor"].str.removesuffix("-perf")
+                perf = perf[perf["criterion"] == "total"].rename(
+                    columns={"value": "wallclock", "executor": "configuration"}
+                )
+                perf = perf[["benchmark", "configuration", "wallclock"]]
+                perf_metrics = parse_rt_metrics(Path(prog.path) / "perf" / "metrics")
+
+        if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
+            mem = parse_heaptrack(Path(prog.path) / "heaptrack")
+            mem_metrics = parse_rt_metrics(Path(prog.path) / "mem" / "metrics")
+        else:
+            mem = []
+            mem_metrics = []
+
+        results[prog.name] = (perf, mem, perf_metrics, mem_metrics)
     return results
 
 
@@ -1272,114 +1282,29 @@ def process_conversion_stats(metrics):
         write_stat(f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}")
 
 
-def process_gcvs():
-    results = parse_results(RESULTS_DIR / "gcvs")
-    processed = {}
-    perfs = {}
-    conversions = {}
-
-    for prog, (perf, mem, metrics) in results.items():
-        print_info(f"{prog}")
-
-        # Process metrics
-
-        totals = (
-            metrics.groupby(["suite", "configuration", "benchmark"])
-            .mean(numeric_only=True)
-            .reset_index()
-            .drop(columns=["benchmark"])
-            .groupby(["suite", "configuration"])
-            .sum()
-            .reset_index()
-        )
-        conv = pd.DataFrame()
-
-        totals["pct_rc"] = pdiff(
-            totals["Arc allocated"] + totals["Rc allocated"], totals["allocations"]
-        )
-        totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
-        totals["pct_gc"] = pdiff(totals["Gc allocated"], totals["allocations"])
-        totals["pct_managed"] = pdiff(totals["Gc reclaimed"], totals["allocations"])
-
-        cols = [
-            "suite",
-            "configuration",
-            "allocations",
-            "pct_rc",
-            "pct_gc",
-            "pct_managed",
-            "Gc reclaimed",
-        ]
-        # totals = totals[cols]
-        # totals = totals.set_index(['suite','configuration'])
-
-        for suite, data in totals.groupby("suite"):
-            rc_leaks = round(
-                totals[totals["configuration"] == BASELINE[suite]][
-                    "leaked allocations"
-                ].iloc[0]
-            )
-            gc = data[data["configuration"] == "gcvs-gc"]
-            gc_leaks = gc["leaked allocations"].iloc[0]
-            all = gc["allocations"].iloc[0]
-            rcs = gc["Rc allocated"].iloc[0] + gc["Arc allocated"].iloc[0]
-            gcs = gc["Gc allocated"].iloc[0]
-            box_ctors = gc["Box allocated"].iloc[0]
-            num_swept = gc["Gc reclaimed"].iloc[0]
-            all = gc["allocations"].iloc[0]
-            finalizers_run = gc["finalizers completed"].iloc[0]
-            freg = gc["finalizers registered"].iloc[0]
-
-            # We use the difference between RC and GC leaks as a proxy for the
-            # number of 'GC' objects still on the heap (because Rc will
-            # deterministically drop on exit, whereas Gc will not). This is not
-            # hugely accurate, but will always serve as a 'lower bound'. There
-            # is however one case where we need to be a bit careful: benchmarks
-            # with cycles can cause large amounts of cyclic Rc garbage which
-            # can exceed the number of GC leaks. In such cases, we don't want
-            # to include this as it would cause us to erroneously think we
-            # converted fewer objects to GC than we had.
-            gc_leaks = max(gc["leaked allocations"].iloc[0] - rc_leaks, 0)
-
-            pct_gc = (gcs / all) * 100
-            gcs_trans = num_swept + gc_leaks + finalizers_run
-            pct_gt = (gcs_trans / all) * 100
-            print_info(f"{suite}")
-            print("finalizers run ", finalizers_run)
-            print("finalizers registered ", freg)
-            print_info(f"Total objects {format_number(all)}")
-            print_info(f"Box constructors {format_number(box_ctors)}")
-            print_info(f"Managed objects {format_number(gcs_trans)}")
-            print_info(f"RC leaks {format_number(rc_leaks)}")
-            print_info(f"GC leaks {format_number(gc_leaks)}")
-            print_info(f"GC constructors {format_number(gcs)}")
-            print_info(f"(a)RC constructors {format_number(rcs)}")
-            print_info(f"PCT managed: {pct_gt:.2f}")
-            print_info(f"PCT explicit GC:{pct_gc:.2f}")
-
-            s = suite.replace("-", "")
-
-            write_stat(f"\n% {suite} conversion stats")
-            write_stat(f"\\newcommand\\{s}heapgcpct{{{pct_gc:.2f}\\%\\xspace}}")
-            write_stat(f"\\newcommand\\{s}heapgctpct{{{pct_gt:.2f}\\%\\xspace}}")
-            write_stat(f"\\newcommand\\{s}heapall{{{format_number(all)}\\xspace}}")
-            write_stat(f"\\newcommand\\{s}heapgcs{{{format_number(gcs)}\\xspace}}")
-            write_stat(
-                f"\\newcommand\\{s}heapgcts{{{format_number(gcs_trans)}\\xspace}}"
-            )
-
-
 def process_experiment(experiment):
     print_info(f"Processing {experiment} results...")
     results = parse_results(RESULTS_DIR / experiment)
     perfs = []
     mems = []
 
-    for prog, (perfraw, memraw, metrics) in results.items():
+    for prog, (perfraw, memraw, perfmetrics, memmetrics) in results.items():
         print_info(f"Processing {prog}...")
 
         if experiment == "gcvs":
-            process_conversion_stats(metrics)
+            if "mem" in PROCESS_PLOT and memmetrics:
+                process_conversion_stats(memmetrics)
+            elif "perf" in PROCESS_PLOT and perfmetrics:
+                print_warning(f"No gcvs mem metrics found for {prog.name}")
+                print_warning(
+                    f"Conversion stats will be less accurate as they will not have access to heaptrack data."
+                )
+                process_conversion_stats(perfmetrics)
+            else:
+                print_warning(f"No gcvs metrics found for {prog.name}")
+                print_warning(
+                    f"Conversion stats will not be added to experiment_stats.tex"
+                )
 
         if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
             perf = process_perf(perfraw, prog, experiment)
@@ -1394,7 +1319,7 @@ def process_experiment(experiment):
             else:
                 mems.append(process_summary(mem))
 
-    if not PROCESS_PLOT or "perf" in PROCESS_PLOT:
+    if "perf" in PROCESS_PLOT:
         perfs = pd.concat(perfs, ignore_index=True)
         stats = process_stats(perfs, experiment, summary=True)
         write_stats(stats, experiment, fmt="perf", summary=True)
@@ -1407,7 +1332,7 @@ def process_experiment(experiment):
         perfltx = perfltx.fillna("-")
         write_table(PLOT_DIR / experiment / "perf_summary.tex", perfltx)
 
-    if not PROCESS_PLOT or "mem" in PROCESS_PLOT:
+    if "mem" in PROCESS_PLOT:
         mems = pd.concat(mems, ignore_index=True)
         stats = process_stats(mems, experiment, summary=True)
         write_stats(stats, experiment, fmt="mem", summary=True)
@@ -1443,7 +1368,7 @@ def main():
     if PROCESS_BENCHMARK:
         print_info(f"Only processing specified benchmarks: {PROCESS_BENCHMARK}")
 
-    if PROCESS_PLOT:
+    if len(PROCESS_PLOT) != 2:
         print_info(f"Only processing specified benchmarks: {PROCESS_PLOT}")
 
     if DRYRUN:
