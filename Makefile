@@ -25,7 +25,7 @@ HEAPTRACK_VERSION = master
 HEAPTRACK_SRC = $(PWD)/heaptrack
 HEAPTRACK = $(HEAPTRACK_SRC)/bin
 
-BENCHMARKS = grmtools ripgrep alacritty fd som
+BENCHMARKS = ripgrep fd alacritty
 # BENCHMARKS = som grmtools alacritty fd regex-redux binary-trees ripgrep
 # BENCHMARKS = regex-redux
 # BENCHMARKS = som grmtools binary-trees grmtools
@@ -45,7 +45,7 @@ export PLOTS_DIR = $(PWD)/plots
 export REBENCH_PROCESSOR = $(PYTHON_EXEC) $(PWD)/process.py
 ALLOY_TARGETS := $(addprefix $(ALLOY_PATH)/, $(ALLOY_DEFAULTS) $(ALLOY_CFGS))
 
-all: build
+all: build bench
 
 .PHONY: venv
 .PHONY: build build-alloy
