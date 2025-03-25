@@ -34,7 +34,7 @@ PEXECS = int(os.environ["PEXECS"])
 EXPERIMENTS = os.environ.get("EXPERIMENTS", "").split()
 BENCHMARKS = os.environ.get("BENCHMARKS", "").split()
 PLOTS = os.environ.get("METRICS", "").split()
-BOOTSTRAP = os.environ.get("DRYRUN", "false") in ["true", "on", "1", "yes"]
+BOOTSTRAP = os.environ.get("BOOTSTRAP", "true") in ["true", "on", "1", "yes"]
 Z = 2.576  # 99% interval
 
 # ============== HELPERS ================
@@ -98,13 +98,14 @@ def ltxify(s):
     return " ".join(word.capitalize() for word in s.split())
 
 
-def format_value_ci(row):
-    if math.isnan(row["ci"]):
-        return "-"
-    # dryrun = "\\jake{{This comment has been automatically inserted to warn you that the CIs were generated with the DRYRUN flag, reducing their bootstrap iterations to only 100. You definitely don't want this and left it in accidentally.}}"
-    s = f"{row['value']:.2f} \\footnotesize{{± {row['ci']:.3f}}}"
-    # if DRYRUN:
-    #     s = s + dryrun
+def fmt_value_ci(row):
+    # lower = row['lower']:.2f
+    # upper = row['upper']:.2f
+    return f"{row['value']:.2f} ({row['lower']:.2f}-{row['upper']:.2f})"
+
+
+def ltx_value_ci(row):
+    s = f"{row['value']:.2f} \\footnotesize{{({row['lower']:.2f}-{row['upper']:.2f})}}"
     return s
 
 
@@ -235,27 +236,21 @@ def ci(row, pexecs):
     return Z * (row / math.sqrt(pexecs))
 
 
-def ci_inl(row, pexecs):
-    return pd.Series({"value": row, "ci": Z * (row / math.sqrt(pexecs))})
+def ci_inl(value, std, pexecs):
+    ci = Z * (value / math.sqrt(pexecs))
+    lower = value - ci
+    upper = value + ci
+    return pd.Series({"value": value, "ci": ci, "upper": upper, "lower": lower})
 
 
 def bootstrap(
     values, kind, method, num_bootstraps=10000, confidence=0.99, symmetric=True
 ):
 
-    if DRYRUN:
-        # This should never be used for real, but it's useful to prevent things
-        # taking forever when trying to quickly debug the script
-        num_bootstraps = 100
-
-    if PEXECS == 1:
-        if symmetric:
-            return pd.Series(
-                {
-                    "value": kind(values),
-                    "ci": 0,
-                }
-            )
+    # if DRYRUN:
+    #     # This should never be used for real, but it's useful to prevent things
+    #     # taking forever when trying to quickly debug the script
+    #     num_bootstraps = 1000
 
     res = stats.bootstrap(
         (values,),
@@ -280,8 +275,6 @@ def bootstrap(
             "lower": res.confidence_interval.low,
             "upper": res.confidence_interval.high,
         }
-        print(data)
-
     return pd.Series(data)
 
 
@@ -303,18 +296,52 @@ def bootstrap_geomean_ci(means, num_bootstraps=10000, confidence=0.99, symmetric
     return bootstrap(means, stats.gmean, method, num_bootstraps, confidence, symmetric)
 
 
-def arith_mean_ci(raw_data, num_bootstraps=10000, confidence=0.99, pexecs=PEXECS):
-    if not BOOTSTRAP:
-        ci_inl(raw_data, pexecs)
+def geomean_with_ci(row, confidence=0.99):
+    """Calculate geometric mean and CI for a DataFrame row"""
+    # Clean data and validate
+    clean_vals = row.dropna()
+    n = len(clean_vals)
 
-    return bootstrap(
-        raw_data, np.mean, "percentile", num_bootstraps, confidence, symmetric=True
+    # Handle edge cases
+    if n == 0 or (clean_vals <= 0).any():
+        return pd.Series([np.nan] * 3, index=["value", "lower", "upper"])
+
+    # Log-transform and calculate statistics
+    log_vals = np.log(clean_vals)
+    mean_log = np.mean(log_vals)
+    std_log = np.std(log_vals, ddof=1)  # Sample standard deviation
+
+    # Calculate confidence interval
+    if n == 1:
+        return pd.Series(
+            [np.exp(mean_log), np.nan, np.nan],
+            index=["value", "lower", "upper"],
+        )
+
+    sem_log = std_log / np.sqrt(n)
+    t_crit = stats.t.ppf((1 + confidence) / 2, df=n - 1)
+
+    ci_log = (mean_log - t_crit * sem_log, mean_log + t_crit * sem_log)
+
+    # Convert back to original scale
+    return pd.Series(
+        [np.exp(mean_log), np.exp(ci_log[0]), np.exp(ci_log[1])],
+        index=["value", "lower", "upper"],
     )
 
 
-def bootstrap_max_ci(raw_data, num_bootstraps=10000, confidence=0.99):
-    return bootstrap(
-        raw_data, np.max, "percentile", num_bootstraps, confidence, symmetric=True
+def arith_mean_ci(series):
+    n = len(series)
+    mean = series.mean()
+    std_err = series.std(ddof=1) / (n**0.5)  # Standard error
+    margin_of_error = stats.t.ppf((1 + 0.99) / 2, df=n - 1) * std_err  # t-score * SE
+    return pd.Series(
+        {
+            "value": mean,
+            "ci": margin_of_error,
+            "lower": mean - margin_of_error,
+            "upper": mean + margin_of_error,
+        }
     )
 
 
@@ -531,10 +558,11 @@ def write_stats(df, experiment, fmt, summary=False):
 
 
 def write_table(outfile, df, include_html=True):
+    df["ltxval"] = df.apply(ltx_value_ci, axis=1)
     ltxtable = df.pivot(
         index="suite",
         columns="configuration",
-        values="latex_value",
+        values="ltxval",
     ).fillna("-")
 
     latex_tabular = ltxtable.to_latex(
@@ -546,23 +574,6 @@ def write_table(outfile, df, include_html=True):
         header=True,
         position=None,
     )
-    print(ltxtable)
-
-    # df = print(df.drop(columns={"latex_value"}))
-
-    # Assuming your DataFrame is called 'df'
-    # result = (
-    #     df.drop(columns={"latex_value"})
-    #     .groupby("configuration")
-    #     .agg(
-    #         {
-    #             "Elision Naive": lambda x: f"{x['value']} ± {x['ci']}",
-    #             "Elision Opt": lambda x: f"{x['value']} ± {x['ci']}",
-    #         }
-    #     )
-    # )
-
-    # df = df.fillna("-")
 
     # Removes lines before \begin{tabular} and after \end{tabular}
     latex_tabular = "\n".join(
@@ -574,9 +585,34 @@ def write_table(outfile, df, include_html=True):
     with open(outfile, "w") as f:
         f.write(latex_tabular)
 
-    print_success(
-        f"Plotted table: {outfile.parts[-3]}:{outfile.parts[-2]}:{outfile.stem.replace('_',':')}"
+    print_success(f"Plotted table: {outfile.parts[-2]}:{outfile.stem.replace('_',':')}")
+
+    if not include_html:
+        return
+
+    df["valci"] = df.apply(fmt_value_ci, axis=1)
+    df = df.pivot(
+        index="suite",
+        columns="configuration",
+        values="valci",
     )
+    print(df)
+    df = df.fillna("-")
+    t = outfile.parts[-2].upper() + " Summary"
+    html = f"""
+        <html>
+        <head>
+            <title>{t}</title>
+        </head>
+        <body>
+            <h2>{t}</h2>
+            {df.to_html()}
+        </body>
+        </html>
+    """
+
+    with open(outfile.with_suffix(".html"), "w") as f:
+        f.write(html)
 
 
 def plot_perf(outfile, values, rows, cols):
@@ -950,18 +986,18 @@ def process_stats(df, experiment, summary=False):
             suite = idx[0] if not summary else idx
             for config in df["value"].columns:
                 value = row[("value", config)]
+                lower = row[("lower", config)]
+                upper = row[("upper", config)]
                 d = {
                     "suite": suite,
                     "configuration": config,
                     "value": value,
-                    "ci": row[("ci", config)],
+                    "upper": upper,
+                    "lower": lower,
                 }
 
                 if not summary:
                     d["benchmark"] = idx[1]
-
-                lower = row[("lower", config)]
-                upper = row[("upper", config)]
 
                 (best_other, best_si) = baseline(
                     suite, row, config, lower, upper, "best"
@@ -989,8 +1025,8 @@ def process_stats(df, experiment, summary=False):
         }
 
     df = df.copy()
-    df["lower"] = df["value"] - df["ci"]
-    df["upper"] = df["value"] + df["ci"]
+    # df["lower"] = df["value"] - df["ci"]
+    # df["upper"] = df["value"] + df["ci"]
     if summary:
         index = "suite"
     else:
@@ -998,7 +1034,7 @@ def process_stats(df, experiment, summary=False):
     pivot = df.pivot_table(
         index=index,
         columns="configuration",
-        values=["value", "ci", "lower", "upper"],
+        values=["value", "lower", "upper"],
     )
 
     diffs = calculate_diffs(pivot)
@@ -1075,9 +1111,10 @@ def process_stats(df, experiment, summary=False):
 
 
 def process_summary(df):
+    print(df)
     gmean = (
         df.groupby(["suite", "configuration"])["value"]
-        .apply(bootstrap_geomean_ci, symmetric=False)
+        .apply(geomean_with_ci)
         .unstack()
         .reset_index()
     )
@@ -1086,11 +1123,23 @@ def process_summary(df):
 
 def process_perf(df, prog, experiment):
     pexecs = df.groupby(["suite", "configuration", "benchmark"]).size().max()
+    # perf = df.groupby(["suite", "configuration", "benchmark"])["wallclock"].apply(
+    #     arith_mean_ci, pexecs=pexecs
+    # )
+    # perf = perf.unstack().reset_index()
+
+    # # Apply function and flatten result
+    # perf = (
+    #     df.groupby(["suite", "configuration", "benchmark"])["wallclock"]
+    #     .apply(lambda x: ci_inl(x, pexecs))  # Apply function correctly
+    #     .reset_index()  #
+    # )
+    # Apply function and **FIX multi-index issue**
     perf = (
         df.groupby(["suite", "configuration", "benchmark"])["wallclock"]
-        .apply(arith_mean_ci, pexecs=pexecs)
+        .apply(arith_mean_ci)  # Get single value
         .unstack()
-        .reset_index()
+        .reset_index()  # Flatten multi-index
     )
 
     if perf["benchmark"].nunique() > 1:
@@ -1111,7 +1160,6 @@ def process_perf(df, prog, experiment):
 
 def process_mem(df, prog, experiment):
     pexecs = df.groupby(["suite", "configuration", "benchmark"]).size().max()
-    print(pexecs)
     mem = (
         df.copy()
         .groupby(["suite", "configuration", "benchmark"])["mem"]
@@ -1320,8 +1368,6 @@ def process_experiment(experiment):
         write_stats(stats, experiment, fmt="perf", summary=True)
         perfs["suite"] = perfs["suite"].replace(SUITES)
         perfs["configuration"] = perfs["configuration"].replace(CFGS)
-        perfs["latex_value"] = perfs.apply(format_value_ci, axis=1)
-        perfs["value_ci"] = perfs.apply(format_value_ci, axis=1)
         write_table(PLOT_DIR / experiment / "perf_summary.tex", perfs)
 
     if mems_ok:

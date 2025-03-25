@@ -45,6 +45,9 @@ export PLOTS_DIR = $(PWD)/plots
 export REBENCH_PROCESSOR = $(PYTHON_EXEC) $(PWD)/process.py
 ALLOY_TARGETS := $(addprefix $(ALLOY_PATH)/, $(ALLOY_DEFAULTS) $(ALLOY_CFGS))
 
+XVFB_DISPLAY := :99
+XVFB_CMD := Xvfb $(XVFB_DISPLAY) -screen 0 1600x1200x16 -nolisten tcp
+
 all: build bench
 
 .PHONY: venv
@@ -91,11 +94,29 @@ $(HEAPTRACK): $(HEAPTRACK_SRC)
 		make -j$(numproc) install
 
 
+# Start Xvfb
+start-xvfb:
+	@echo "Starting Xvfb on display $(XVFB_DISPLAY)..."
+	$(XVFB_CMD) &
+	@sleep 2
+	@echo "Xvfb started."
+
 build: build-alloy
 	$(foreach b, $(BENCHMARK_DIRS), cd $(b)/ && make build;)
 
 # bench: venv $(RESULTS)
-bench: $(PERF_RESULTS)
+bench: start-xvfb $(PERF_RESULTS)
+	stop-xvfb
+
+stop-xvfb:
+	@echo "Stopping Xvfb on display $(XVFB_DISPLAY)..."
+	@if [ -f /tmp/.X$(subst :,,$(XVFB_DISPLAY))-lock ]; then \
+		echo "Killing Xvfb process..."; \
+		kill $$(ps aux | grep '[X]vfb $(XVFB_DISPLAY)' | awk '{print $$2}') || true; \
+		rm -f /tmp/.X$(subst :,,$(XVFB_DISPLAY))-lock; \
+	else \
+		echo "No Xvfb lock file found. Skipping."; \
+	fi
 
 $(RESULTS_DIR)/%.csv:
 	mkdir -p $(basename $@)/metrics/runtime
