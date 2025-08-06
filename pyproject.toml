@@ -37,6 +37,7 @@ dependencies = [
     "toml==0.10.2",
     "gdown==5.1.0",
     "xvfbwrapper",
-    "jinja2"
+    "jinja2",
+    "zstandard"
 ]
 

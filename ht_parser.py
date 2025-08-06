@@ -334,9 +334,6 @@ def interpolate(
 
 
 def normalize_and_resample(df: pd.DataFrame, num_points: int = 200) -> pd.DataFrame:
-    """
-    Convert timestamp→normalized_time 0–1 and resample to num_points.
-    """
     if df.empty:
         return df
 
@@ -500,15 +497,11 @@ def plot_time_series(df: pd.DataFrame):
     plt.savefig("memplots/binary_trees.svg", format="svg", bbox_inches="tight")
 
 
-def plot_ripgrep_subset(
-    df: pd.DataFrame, benchmark=None, suite=None, title=None, outfile=None
-):
+def plot_ripgrep_subset(df, benchmark=None, suite=None, title=None, outfile=None):
 
     colour_map = {
         GCVS.GC: ["#3A87D9", "#1A5C85", 0.8, "-"],
         GCVS.ARC: ["#FF8F2E", "#D66000", 0.8, "-"],
-        GCVS.RC: ["#FF8F2E", "#D66000", 0.8, "-"],
-        GCVS.BASELINE: ["#000000", "grey", 0.6, "--"],
     }
 
     fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.5))
@@ -543,7 +536,7 @@ def plot_ripgrep_subset(
             )
             ax.margins(x=0, y=0)
         ax.set_ylim(0, 10)
-        ax.set_title(BMS[benchmark], fontsize=16, y=1.02)
+        ax.set_title(benchmark, fontsize=16, y=1.02)
 
         if i == 0:
             handles, labels = [], []
@@ -570,7 +563,7 @@ def plot_ripgrep_subset(
     fig.supylabel("Heap Size (MiB)", fontsize=12, y=0.55)
     fig.supxlabel("Normalized Time (0→1)", fontsize=12, y=0.05)
     plt.tight_layout()
-    plt.savefig(f"memplots/ripgrep.svg", format="svg", bbox_inches="tight")
+    plt.savefig(f"plots/ripgrep_subset.svg", format="svg", bbox_inches="tight")
     return outfile
 
 

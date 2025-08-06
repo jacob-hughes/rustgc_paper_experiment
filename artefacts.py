@@ -1,27 +1,17 @@
 import logging
 import os
 import shutil
-from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Dict, Optional, Tuple
 
 import toml
 
-from util import command_runner
-
-DRY_RUN = os.getenv("DRY_RUN", False)
-
 BIN_DIR = Path("artefacts/bin").resolve()
 LIB_DIR = Path("artefacts/lib").resolve()
 BUILD_DIR = Path("artefacts/build").resolve()
 SRC_DIR = Path("src").resolve()
 PATCH_DIR = Path("patch").resolve()
-
-
-class BuildError(Exception):
-    def __str__(self):
-        return f"Build error: {self.message}"
 
 
 @dataclass(frozen=True)
@@ -37,8 +27,7 @@ class Repo:
     def src(self):
         return SRC_DIR / self.name
 
-    @command_runner(description="Cloning", steps=300)
-    def _clone(self):
+    def _clone(self, c):
         clone = ["git", "clone", "--progress"]
         if self.recursive:
             clone.append("--recursive")
@@ -46,73 +35,24 @@ class Repo:
         if self.shallow_clone:
             clone.extend(["--depth", "1"])
 
-        clone.extend([self.url, self.src])
+        clone.extend([self.url, str(self.src)])
+        c.run(" ".join(clone))
+
         return clone
 
-    @command_runner(description="Checking out", steps=300)
-    def _checkout(self):
-        return ["git", "-C", self.src, "checkout", self.version]
+    def _checkout(self, c):
+        c.run(" ".join(["git", "-C", str(self.src), "checkout", self.version]))
 
-    @command_runner(description="Patching", steps=1, write_progress=False)
-    def _patch(self, diff):
-        return ["git", "-C", self.src, "apply", diff]
-
-    @command_runner(
-        description="Resetting working tree for", steps=1, write_progress=False
-    )
-    def _reset(self):
-        return ["git", "-C", self.src, "reset", "--hard"]
-
-    def fetch(self):
+    def fetch(self, c):
         if self.src.exists():
             return
 
-        self._clone()
-        self._checkout()
-
-    @contextmanager
-    def patch(self, suffix: Optional[str]):
-        self._reset()
-        if suffix:
-            patch = PATCH_DIR / f"{self.name}.{suffix}.diff"
-            self._patch(patch)
-        else:
-            logging.info(f"No patch applied for {self.name}")
-        yield
-        self._reset()
+        self._clone(c)
+        self._checkout(c)
 
     def remove(self):
         shutil.rmtree(self.src)
         logging.info(f"-> removed: {self.src}")
-
-
-def prepare_build(method):
-    def wrapper(self, *args, **kwargs):
-        if self.installed:
-            logging.info(
-                f"Skipping {self.name}: {os.path.relpath(self.path)} already exists"
-            )
-            return
-
-        if not self.build_dir:
-            raise BuildError(f" No build directory specified for {self.name}")
-
-        if not self.install_prefix:
-            raise BuildError(f" No install prefix specified for {self.name}")
-
-        for dep in self.deps:
-            dep.build()
-
-        self.repo.fetch()
-        logging.info(f"Starting build: {self.name}")
-        self.install_prefix.mkdir(parents=True, exist_ok=True)
-        self.build_dir.mkdir(parents=True, exist_ok=True)
-        method(self, *args, **kwargs)
-        logging.info(
-            f"Build finished: {self.name}, installed at '{os.path.relpath(self.path)}'"
-        )
-
-    return wrapper
 
 
 @dataclass(frozen=True)
@@ -151,7 +91,7 @@ class Artefact:
 
 class Heaptrack(Artefact):
     def build(self, c):
-        self.repo.fetch()
+        self.repo.fetch(c)
         self.build_dir.mkdir(parents=True, exist_ok=True)
         self.install_prefix.mkdir(parents=True, exist_ok=True)
 
@@ -176,8 +116,8 @@ class Heaptrack(Artefact):
 ALLOY = Artefact(
     repo=Repo(
         name="alloy",
-        url="https://github.com/jacob-hughes/alloy",
-        version="quickfix-stats",
+        url="https://github.com/softdevteam/alloy",
+        version="master",
     ),
 )
 
@@ -271,25 +211,36 @@ class Alloy(Artefact):
     def installed(self) -> bool:
         return self.path.exists()
 
-    @command_runner(dry_run=DRY_RUN)
-    def _xpy_install(self):
-        return [
-            f"{self.src}/x.py",
+    def build_alloy(self, c):
+        if self.installed:
+            logging.info(f"{self.path} already exists. Skipping...")
+            return
+
+        self.repo.fetch(c)
+        self.install_prefix.mkdir(parents=True, exist_ok=True)
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Starting build: {self.name}")
+        build_cmd = [
+            f"{str(self.src)}/x.py",
             "install",
             "--config",
-            self.config,
+            str(self.config),
             "--stage",
             "2",
             "--build-dir",
-            self.build_dir,
+            str(self.build_dir),
             "--set",
             "build.docs=false",
             "--set",
-            f"install.prefix={self.install_prefix}",
+            f"install.prefix={str(self.install_prefix)}",
             "--set",
             "install.sysconfdir=etc",
         ]
 
-    @prepare_build
-    def build(self):
-        self._xpy_install()
+        try:
+            c.run(" ".join(build_cmd))
+        except Exception as e:
+            logging.error(f"Failed to build {self.src}: {e}")
+            raise
+
+        logging.info(f"Successfully installed {self.install_prefix}")

@@ -50,9 +50,10 @@ class AlloyAdapter(GaugeAdapter):
 
     def setup_stats(self, run_id):
         bm = run_id.benchmark.name.lower()
-        if "GC_LOG_DIR" in run_id.env:
-            logdir = run_id.env["GC_LOG_DIR"]
-            run_id.env["GC_LOG_FILE"] = f"{logdir}-{bm}.csv"
+        if "USE_MT" in run_id.env:
+            dir = run_id.env["RESULTS_DIR"]
+            out = f"{dir}/{bm}-{run_id.completed_invocations + 1}"
+            run_id.env["GC_LOG_FILE"] = f"{out}.json"
 
     def acquire_command(self, run_id):
         self.setup_stats(run_id)
@@ -61,12 +62,11 @@ class AlloyAdapter(GaugeAdapter):
         if not self._completed_time_availability_check:
             self._check_which_time_command_is_available()
 
-        if "GC_HEAPTRACK_DIR" in run_id.env:
-            dir = run_id.env["GC_HEAPTRACK_DIR"]
+        if "USE_HT" in run_id.env:
+            dir = run_id.env["RESULTS_DIR"]
             bm = run_id.benchmark.name.lower()
             out = f"{dir}/{bm}-{run_id.completed_invocations + 1}"
-            ht = run_id.env["HEAPTRACK_PATH"]
-            run_id.env["GC_HEAPTRACK_ZST"] = out
+            ht = run_id.env["HT_PATH"]
             command = " ".join([ht, "--record-only", "-o", out, command])
         return self._create_command(command)
 
@@ -126,15 +126,6 @@ class AlloyAdapter(GaugeAdapter):
                 measure = Measurement(
                     invocation, iteration, time, "ms", run_id, "total"
                 )
-
-                # if "GC_HEAPTRACK_DIR" in run_id.env:
-                #     zst = run_id.env["GC_HEAPTRACK_ZST"]
-                #     ht_print = run_id.env["HEAPTRACK_PRINT_PATH"]
-                #     subprocess.run(
-                #         [ht_print, "-M", f"{zst}.massif", f"{zst}.zst"],
-                #         stdout=subprocess.DEVNULL,
-                #         stderr=subprocess.DEVNULL,
-                #     )
 
                 current.add_measurement(measure)
                 data_points.append(current)

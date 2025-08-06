@@ -1,11 +1,22 @@
 import os
+from pathlib import Path
 
 from invoke import task
 
-import results
-from artefacts import HEAPTRACK
-from build import BenchmarkSuite, Experiments, Metric
-from util import timer
+from build import (
+    GCVS,
+    HEAPTRACK,
+    Aggregation,
+    BenchmarkSuite,
+    Elision,
+    Experiments,
+    HeapSize,
+    Measurement,
+    Metric,
+    PremOpt,
+)
+from plots import ltx_ms_to_s
+from results import Heaptrack, Metrics, Perf
 
 
 def _parse_args(pexecs, exps=None, suites=None, measurements=None):
@@ -19,7 +30,7 @@ def _parse_args(pexecs, exps=None, suites=None, measurements=None):
     )
 
 
-def _build_alloy(experiments: "Experiments", warn_if_empty=False):
+def _build_alloy(c, experiments, warn_if_empty=False):
     cfgs = experiments.alloy_variants(only_missing=True)
     if not cfgs:
         if warn_if_empty:
@@ -30,9 +41,8 @@ def _build_alloy(experiments: "Experiments", warn_if_empty=False):
         f"{len(cfgs)} Alloy variant(s) require installing for {len(experiments.experiments)} experiment(s):"
     )
     [print(f"  {a.name}") for a in cfgs]
-    with timer("Building", sum(a.steps for a in cfgs)):
-        for a in cfgs:
-            a.build()
+    for a in cfgs:
+        a.build_alloy(c)
 
 
 def list_exps(c):
@@ -47,7 +57,7 @@ def list_exps(c):
 def build_alloy(c, experiments=None, measurements=None):
     """Build all alloy configurations"""
     exps = _parse_args(pexecs=0, exps=experiments, measurements=measurements)
-    _build_alloy(exps, warn_if_empty=True)
+    _build_alloy(c, exps, warn_if_empty=True)
 
 
 @task
@@ -58,13 +68,12 @@ def build_heaptrack(c):
 @task
 def build_benchmarks(c, experiments=None, suites=None, measurements=None):
     """Build all benchmarks for all configurations"""
-    build_heaptrack(c)
     exps = _parse_args(
         pexecs=0, exps=experiments, suites=suites, measurements=measurements
     )
-    _build_alloy(exps)
+    _build_alloy(c, exps)
 
-    cfgs = exps.configurations(only_missing=True)
+    cfgs = exps.configurations()
     if not cfgs:
         print("Nothing to do")
         return
@@ -75,17 +84,18 @@ def build_benchmarks(c, experiments=None, suites=None, measurements=None):
 
 
 @task
+def prerequisites(c):
+    BenchmarkSuite.prerequisites(c)
+
+
+@task
 def run_benchmarks(c, pexecs, experiments=None, suites=None, measurements=None):
     exps = _parse_args(
         int(pexecs), exps=experiments, suites=suites, measurements=measurements
     )
 
-    with timer(
-        f"Running {len(exps.experiments)} experiments for {exps.total_iters} iterations",
-        exps.total_iters,
-        detailed=True,
-    ):
-        exps.run(c, pexecs)
+    print("Running")
+    exps.run(c, pexecs)
 
 
 @task
@@ -114,8 +124,80 @@ def clean_alloy(c, experiments=None):
 
 
 @task
-def process_results(c):
-    results.process_results()
+def process_results(c, experiments=None, suites=None, measurements=None):
+    exps = _parse_args(0, exps=experiments, suites=suites, measurements=measurements)
+
+    Path("tables").mkdir(exist_ok=True)
+    Path("plots").mkdir(exist_ok=True)
+
+    htraw = Heaptrack.process(exps)
+    htraw.plot_time_series()
+    ht = htraw.aggregate(GCVS)
+    ht.plot(Metric.MEM_HSIZE_AVG)
+
+    gcvs = Perf.process(exps).aggregate(GCVS)
+    gcvs.plot(Metric.WALLCLOCK)
+    gcvs.tabulate(
+        Metric.WALLCLOCK,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+    gcvs.tabulate_binary_trees()
+    gcvs.tabulate(
+        Metric.USER,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+    gcvs.tabulate(
+        Metric.USER,
+        Aggregation.SUITE_GEO,
+        format_func=ltx_ms_to_s,
+    )
+    jemalloc = Perf.process(exps).aggregate(GCVS, baseline=GCVS.BASELINE)
+    jemalloc.tabulate_allocators()
+
+    pelide = Perf.process(exps).aggregate(Elision)
+    pelide.plot(Metric.WALLCLOCK, xlim=(0, 1.5))
+    pelide.plot(Metric.USER, xlim=(0, 1.5))
+    pelide.tabulate(
+        Metric.WALLCLOCK,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+    pelide.tabulate(
+        Metric.USER,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+
+    pprem = Perf.process(exps).aggregate(PremOpt)
+    pprem.plot(Metric.WALLCLOCK, xlim=(0.6, 1.4))
+
+    melide = Metrics.process(exps).aggregate(Elision)
+    melide.plot(Metric.MEM_HSIZE_AVG, xlim=(0, 1.5))
+    melide.plot(Metric.TIME_TOTAL, xlim=(0, 1.5))
+    melide.plot(Metric.TOTAL_COLLECTIONS, xlim=(0, 1.5))
+
+    melide.tabulate(
+        Metric.MEM_HSIZE_AVG,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+
+    melide.tabulate(
+        Metric.OBJ_ALLOCD_GC,
+        Aggregation.INDIVIDUAL,
+        format_func=ltx_ms_to_s,
+        split=(["alacritty", "fd", "som-rs-ast"], ["grmtools", "ripgrep", "som-rs-bc"]),
+    )
+
+    fixed = Perf.process(exps).aggregate(HeapSize)
+    fixed.tabulate_fixed_size()
 
 
 @task

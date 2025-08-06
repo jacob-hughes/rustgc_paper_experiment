@@ -1,15 +1,228 @@
 import logging
 import os
+import shutil
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple
 
+import toml
 import yaml
 from xvfbwrapper import Xvfb
 
-import benchmarks
-from artefacts import *
+BIN_DIR = Path("artefacts/bin").resolve()
+LIB_DIR = Path("artefacts/lib").resolve()
+BUILD_DIR = Path("artefacts/build").resolve()
+SRC_DIR = Path("src").resolve()
+PATCH_DIR = Path("patch").resolve()
+
+
+@dataclass(frozen=True)
+class Repo:
+    name: str
+    url: str
+    version: str
+    recursive: bool = False
+    shallow_clone: bool = False
+    post_checkout: Optional[Tuple[str]] = None
+
+    @property
+    def src(self):
+        return SRC_DIR / self.name
+
+    def _clone(self, c):
+        clone = ["git", "clone", "--progress"]
+        if self.recursive:
+            clone.append("--recursive")
+
+        if self.shallow_clone:
+            clone.extend(["--depth", "1"])
+
+        clone.extend([self.url, str(self.src)])
+        c.run(" ".join(clone))
+
+        return clone
+
+    def _checkout(self, c):
+        c.run(" ".join(["git", "-C", str(self.src), "checkout", self.version]))
+
+    def fetch(self, c):
+        if self.src.exists():
+            return
+
+        self._clone(c)
+        self._checkout(c)
+
+    def remove(self):
+        shutil.rmtree(self.src)
+        logging.info(f"-> removed: {self.src}")
+
+
+@dataclass(frozen=True)
+class Artefact:
+    repo: Optional[Repo] = None
+
+    @property
+    def src(self) -> Path:
+        return SRC_DIR / self.repo.name
+
+    @property
+    def install_prefix(self) -> Path:
+        return BIN_DIR / self.repo.name
+
+    @property
+    def path(self) -> Path:
+        return self.install_prefix / self.name
+
+    @property
+    def installed(self) -> Path:
+        return os.path.lexists(self.path)
+
+    @property
+    def build_dir(self) -> Path:
+        return BUILD_DIR / self.repo.name
+
+    def remove(self, including_src=False):
+        logging.info(f"Removing {self.name}:")
+        self.path.unlink(missing_ok=True)
+        logging.info(f"-> removed: {self.path}")
+        shutil.rmtree(self.build_dir)
+        logging.info(f"-> removed: {self.build_dir}")
+        if including_src:
+            self.repo.remove()
+
+
+class Heaptrack(Artefact):
+    def build(self, c):
+        self.repo.fetch(c)
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        self.install_prefix.mkdir(parents=True, exist_ok=True)
+
+        cmake = [
+            "cmake",
+            "-S",
+            str(self.repo.src),
+            "-B",
+            str(self.build_dir),
+            f"-DCMAKE_INSTALL_PREFIX={self.install_prefix}",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ]
+        c.run(" ".join(cmake))
+        with c.cd(self.build_dir):
+            c.run("make -j install")
+
+    @property
+    def path(self) -> Path:
+        return self.install_prefix / "bin" / "heaptrack"
+
+
+class Alloy(Artefact):
+    DEFAULT_FLAGS: ClassVar[Dict[str, bool]] = {
+        "finalizer-safety-analysis": False,
+        "finalizer-elision": True,
+        "premature-finalizer-prevention": True,
+        "premature-finalizer-prevention-optimize": True,
+        "gc-default-allocator": True,
+    }
+
+    def __init__(self, profile: "ExperimentProfile", metrics=False):
+        self.__dict__.update(ALLOY.__dict__)
+        self.profile = profile
+        self.metrics = metrics
+        self._config = None
+        self.flags = self.DEFAULT_FLAGS.copy() | (self.profile.alloy_flags or {})
+
+    @property
+    def config(self) -> Path:
+        if self._config:
+            return self._config
+
+        flags = self.flags.copy()
+        if self.metrics:
+            flags.update({"gc-metrics": True})
+
+        config = {
+            "alloy": flags,
+            "rust": {
+                "codegen-units": 0,
+                "optimize": True,
+                "debug": False,
+            },
+            "build": {
+                "install-stage": 2,
+            },
+            "llvm": {
+                "download-ci-llvm": True,
+            },
+            "install": {
+                "sysconfdir": "etc",
+            },
+        }
+        file = self.src / f"{self.name.replace('-','.')}.config.toml"
+        with open(file, "w") as f:
+            toml.dump(config, f)
+        return file
+
+    @property
+    def name(self) -> str:
+        if not self.flags["gc-default-allocator"]:
+            base = "rustc-upstream"
+        elif self.flags == self.DEFAULT_FLAGS:
+            base = "default"
+        else:
+            base = self.profile.full
+        return f"{base}-metrics" if self.metrics else base
+
+    @property
+    def install_prefix(self) -> Path:
+        return BIN_DIR / self.repo.name / self.name
+
+    @property
+    def build_dir(self) -> Path:
+        return BUILD_DIR / self.repo.name / self.name
+
+    @property
+    def path(self) -> Path:
+        return self.install_prefix / "bin" / "rustc"
+
+    @property
+    def installed(self) -> bool:
+        return self.path.exists()
+
+    def build_alloy(self, c):
+        if self.installed:
+            logging.info(f"{self.path} already exists. Skipping...")
+            return
+
+        self.repo.fetch(c)
+        self.install_prefix.mkdir(parents=True, exist_ok=True)
+        self.build_dir.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Starting build: {self.name}")
+        build_cmd = [
+            f"{str(self.src)}/x.py",
+            "install",
+            "--config",
+            str(self.config),
+            "--stage",
+            "2",
+            "--build-dir",
+            str(self.build_dir),
+            "--set",
+            "build.docs=false",
+            "--set",
+            f"install.prefix={str(self.install_prefix)}",
+            "--set",
+            "install.sysconfdir=etc",
+        ]
+
+        try:
+            c.run(" ".join(build_cmd))
+        except Exception as e:
+            logging.error(f"Failed to build {self.src}: {e}")
+            raise
+
+        logging.info(f"Successfully installed {self.install_prefix}")
+
 
 REBENCH_DATA = "results.data"
 
@@ -168,7 +381,7 @@ def double_quoted_str_representer(dumper, data):
 yaml.add_representer(DoubleQuotedStr, double_quoted_str_representer)
 
 
-REBENCH_EXEC = "rebench"
+REBENCH_EXEC = Path(".venv/bin/rebench")
 REBENCH_CONF = Path("rebench.conf").resolve()
 RESULTS_DIR = Path("results").resolve()
 PATCH_DIR = Path("patch").resolve()
@@ -184,7 +397,6 @@ class Measurement(Enum):
 
 
 class ExperimentProfile(Enum):
-
     def __init__(self, value, latex, alloy_flags=None):
         self._value_ = value
         self.latex = latex
@@ -215,6 +427,12 @@ class ExperimentProfile(Enum):
     def __lt__(self, other):
         return self.value < other.value
 
+    @classmethod
+    def has_value(cls, value):
+        if "default" in value:
+            return True
+        return value in cls._value2member_map_
+
 
 class GCVS(ExperimentProfile):
     GC = ("gc", r"\texttt{Gc<T>} (Alloy)")
@@ -222,7 +440,7 @@ class GCVS(ExperimentProfile):
     ARC = ("arc", r"\texttt{Arc<T>}/\texttt{Rc<T>}")
     BASELINE = (
         "baseline",
-        r"RC \texttt{[jemalloc]}",
+        r"\texttt{Arc<T>}/\texttt{Rc<T>} (jemalloc)",
         {"gc-default-allocator": False},
     )
     TYPED_ARENA = ("typed-arena", r"\texttt{Arena<T>")
@@ -242,8 +460,12 @@ class GCVS(ExperimentProfile):
                 return cls.RC
             elif f"arc" in value:
                 return cls.RC
-            elif f"{member.value}" in value:
-                return member
+            elif f"baseline" in value:
+                return cls.BASELINE
+            elif f"typed-arena" in value:
+                return cls.TYPED_ARENA
+            elif f"rust-gc" in value:
+                return cls.RUST_GC
             elif "default" in value:
                 return cls.GC
         return None
@@ -278,10 +500,12 @@ class PremOpt(ExperimentProfile):
     def _missing_(cls, value):
         if value == "default":
             return cls.OPT
-        else:
-            for member in cls:
-                if member.value in value:
-                    return member
+
+        profile = value.rsplit("-", 1)[-1]
+
+        for member in cls:
+            if member.value == profile:
+                return member
         return None
 
     @property
@@ -296,7 +520,7 @@ class Elision(ExperimentProfile):
     @classmethod
     @property
     def measurements(cls):
-        return [Measurement.PERF, Measurement.METRICS]
+        return [Measurement.PERF, Measurement.METRICS, Measurement.HEAPTRACK]
 
     @classmethod
     def _missing_(cls, value):
@@ -388,13 +612,10 @@ def cargo_build(c, src, outdir, install_dir, build_artefact, bin, env=None):
         return
 
     try:
-        if target_path.is_symlink():
-            target_path.unlink()
-
-        os.symlink(source_path.absolute(), target_path)
-        logging.info(f"Symlinked {source_path} -> {target_path}")
+        shutil.copy2(source_path, target_path)
+        logging.info(f"Copied {source_path} -> {target_path}")
     except OSError as e:
-        logging.error(f"Failed to create symlink for {bin}: {e}")
+        logging.error(f"Failed to copy {bin}: {e}")
         raise
 
     logging.info(f"Successfully installed {source_path} --> {target_path}")
@@ -427,12 +648,56 @@ def patch_repo(c, repo_path, patch_file):
 
 
 @dataclass(frozen=True)
+class Benchmark:
+    name: str
+    extra_args: Any = None
+    latex_name: str = None
+
+    @property
+    def latex(self):
+        return self.latex_name or self.name
+
+    def __repr__(self):
+        return self.latex
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __lt__(self, other):
+        return self.name < other.name
+
+
+@dataclass(frozen=True)
 class BenchmarkSuite:
     name: str
-    crate: str
-    remove: str
     benchmarks: Tuple["Benchmark"]
     gcvs: Optional[Tuple[ExperimentProfile]] = None
+
+    @classmethod
+    def prerequisites(self, c):
+        install_linux(c)
+        SOMRS.fetch(c)
+        cargo_build(
+            c,
+            ERRORGEN,
+            BUILD_DIR / "extra/errorgen",
+            BIN_DIR / "extra/errorgen",
+            "errorgen",
+            "errorgen",
+        )
+        for repo in JAVA_SRCS:
+            repo.fetch(c)
+
+        for repo in JAVA_SRCS:
+            if has_unstaged_changes(c, repo.src):
+                logging.info(
+                    f"{repo.name} sources have already had parser-errors introduced. Skipping..."
+                )
+                continue
+            with c.cd(repo.src):
+                c.run(
+                    str(BIN_DIR / "extra" / "errorgen" / "errorgen") + " " + repo.name
+                )
 
     @property
     def path(self) -> Path:
@@ -441,9 +706,12 @@ class BenchmarkSuite:
     def __repr__(self):
         return self.name
 
+    def __lt__(self, other):
+        return self.name < other.name
+
     @property
     def latex(self) -> str:
-        return f"\\{self.name.replace('-','')}"
+        return f"{self.name.replace('_',' ')}"
 
     def raw_data(self, measurement) -> Path:
         return RESULTS_DIR / self.name / measurement.value / "results.data"
@@ -467,83 +735,174 @@ class BenchmarkSuite:
     def all(cls) -> Set["BenchmarkSuite"]:
         return {
             Grmtools(
-                "grmtools", "", "", benchmarks=benchmarks.GRMTOOLS, gcvs=(GCVS.RC,)
+                "grmtools",
+                (
+                    Benchmark(
+                        "eclipse",
+                        extra_args=str(SRC_DIR / "eclipse"),
+                        latex_name="Eclipse",
+                    ),
+                    Benchmark(
+                        "hadoop",
+                        extra_args=str(SRC_DIR / "hadoop"),
+                        latex_name="Hadoop",
+                    ),
+                    Benchmark(
+                        "spring",
+                        extra_args=str(SRC_DIR / "spring"),
+                        latex_name="Spring",
+                    ),
+                    Benchmark(
+                        "jenkins",
+                        extra_args=str(SRC_DIR / "jenkins"),
+                        latex_name="Jenkins",
+                    ),
+                ),
+                gcvs=(GCVS.RC,),
             ),
             BinaryTrees(
                 "binary_trees",
-                "",
-                "",
-                benchmarks.BINARY_TREES,
+                (Benchmark("binary_trees", extra_args=14, latex_name="Binary Trees"),),
                 (GCVS.ARC, GCVS.TYPED_ARENA, GCVS.BASELINE, GCVS.RUST_GC),
             ),
             RegexRedux(
                 "regex_redux",
-                "",
-                "",
-                benchmarks.REGEX_REDUX,
+                (
+                    Benchmark(
+                        "regex_redux",
+                        extra_args="0 < redux_input.txt",
+                        latex_name="Regex Redux",
+                    ),
+                ),
                 (GCVS.ARC,),
             ),
             RipGrep(
                 "ripgrep",
-                "",
-                "",
-                benchmarks.RIPGREP,
+                (
+                    Benchmark("linux_alternates", latex_name="Alternates"),
+                    Benchmark("linux_alternates_casei", latex_name="Alternates (-i)"),
+                    Benchmark("linux_literal", latex_name="Literal"),
+                    Benchmark("linux_literal_casei", latex_name="Literal (-i)"),
+                    Benchmark("linux_literal_default", latex_name="Literal (default)"),
+                    Benchmark("linux_literal_mmap", latex_name="Literal (mmap)"),
+                    Benchmark(
+                        "linux_literal_casei_mmap", latex_name="Literal (mmap, -i)"
+                    ),
+                    Benchmark("linux_word", latex_name="Word"),
+                    Benchmark("linux_unicode_greek", latex_name="UTF Greek"),
+                    Benchmark("linux_unicode_greek_casei", latex_name="UTF Greek (-i)"),
+                    Benchmark("linux_unicode_word_1", latex_name="UTF Word"),
+                    Benchmark("linux_unicode_word_2", latex_name="UTF Word (alt.)"),
+                    Benchmark("linux_re_literal_suffix", latex_name="Literal (regex)"),
+                ),
                 (GCVS.ARC,),
             ),
             Alacritty(
                 "alacritty",
-                "",
-                "",
-                benchmarks.ALACRITTY,
+                (
+                    Benchmark("cursor_motion", latex_name="Cur. Motion"),
+                    Benchmark("dense_cells", latex_name="Dense Cells"),
+                    Benchmark("light_cells", latex_name="Light Cells"),
+                    Benchmark("scrolling", latex_name="Scroll"),
+                    Benchmark("scrolling_bottom_region", latex_name="Scroll Btm"),
+                    Benchmark(
+                        "scrolling_bottom_small_region", latex_name="Scroll Btm (small)"
+                    ),
+                    Benchmark("scrolling_fullscreen", latex_name="Scroll (fullscreen)"),
+                    Benchmark("scrolling_top_region", latex_name="Scroll Top"),
+                    Benchmark(
+                        "scrolling_top_small_region", latex_name="Scroll Top (small)"
+                    ),
+                    Benchmark("unicode", latex_name="Unicode"),
+                ),
                 (GCVS.ARC,),
             ),
-            FdFind("fd", "", "", benchmarks.FD, (GCVS.ARC,)),
+            FdFind(
+                "fd",
+                (
+                    Benchmark(
+                        name="no-pattern",
+                        extra_args=f"--hidden --no-ignore . '{LINUX.src}'",
+                        latex_name="No Pattern",
+                    ),
+                    Benchmark(
+                        name="simple-pattern",
+                        extra_args=f"'.*[0-9]\\.jpg$' . '{LINUX.src}'",
+                        latex_name="Simple",
+                    ),
+                    Benchmark(
+                        name="simple-pattern-HI",
+                        extra_args=f"-HI '.*[0-9]\\.jpg$' . '{LINUX.src}'",
+                        latex_name="Simple (-HI)",
+                    ),
+                    Benchmark(
+                        name="file-extension",
+                        extra_args=f"-HI --extension jpg . '{LINUX.src}'",
+                        latex_name="File Extension",
+                    ),
+                    Benchmark(
+                        name="file-type",
+                        extra_args=f"-HI --type l . '{LINUX.src}'",
+                        latex_name="File Type",
+                    ),
+                    Benchmark(
+                        name="command-execution",
+                        extra_args=f"'ab' . '{LINUX.src}' --exec echo",
+                        latex_name="Cmd Exec.",
+                    ),
+                    Benchmark(
+                        name="command-execution-large-output",
+                        extra_args=f"-tf 'ab' . '{LINUX.src}' --exec echo",
+                        latex_name="Cmd Exec. (large)",
+                    ),
+                ),
+                (GCVS.ARC,),
+            ),
             SomrsAST(
                 "som-rs-ast",
-                "",
-                "",
-                benchmarks.SOM,
+                SOM_BENCHMARKS,
                 (GCVS.RC,),
             ),
-            SomrsBC("som-rs-bc", "", "", benchmarks.SOM, (GCVS.RC,)),
+            SomrsBC("som-rs-bc", SOM_BENCHMARKS, (GCVS.RC,)),
         }
 
 
+JAVA_SRCS = (
+    Repo(
+        name="jenkins",
+        shallow_clone=True,
+        url="https://github.com/jenkinsci/jenkins",
+        version="master",
+    ),
+    Repo(
+        name="spring",
+        shallow_clone=True,
+        url="https://github.com/spring-projects/spring-framework",
+        version="main",
+    ),
+    Repo(
+        name="hadoop",
+        shallow_clone=True,
+        url="https://github.com/apache/hadoop",
+        version="trunk",
+    ),
+    Repo(
+        name="eclipse",
+        shallow_clone=True,
+        url="https://github.com/eclipse-platform/eclipse.platform",
+        version="master",
+    ),
+)
+ERRORGEN = Path(SRC_DIR / "errorgen")
+
+
 class Grmtools(BenchmarkSuite):
-    JAVA_SRCS = (
-        Repo(
-            name="jenkins",
-            shallow_clone=True,
-            url="https://github.com/jenkinsci/jenkins",
-            version="master",
-        ),
-        Repo(
-            name="spring",
-            shallow_clone=True,
-            url="https://github.com/spring-projects/spring-framework",
-            version="master",
-        ),
-        Repo(
-            name="hadoop",
-            shallow_clone=True,
-            url="https://github.com/apache/hadoop",
-            version="master",
-        ),
-        Repo(
-            name="eclipse",
-            shallow_clone=True,
-            url="https://github.com/eclipse-platform/eclipse.platform",
-            version="master",
-        ),
-    )
 
     GRMTOOLS = Repo(
         name="grmtools",
         url="https://github.com/softdevteam/grmtools",
         version="a0972be0777e599a3dbca710fb0a595c39560b69",
     )
-
-    ERRORGEN = Path(SRC_DIR / "errorgen")
 
     PARSERBENCH = Path(SRC_DIR / "parserbench")
 
@@ -560,30 +919,32 @@ class Grmtools(BenchmarkSuite):
     )
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        for repo in self.JAVA_SRCS:
-            repo.fetch()
+        for repo in JAVA_SRCS:
+            repo.fetch(c)
 
-        self.GRMTOOLS.fetch()
-        self.REGEX.fetch()
-        self.CACTUS.fetch()
+        self.GRMTOOLS.fetch(c)
+        self.REGEX.fetch(c)
+        self.CACTUS.fetch(c)
 
         cargo_build(
             c,
             self.ERRORGEN,
-            BUILD_DIR / "aux/errorgen",
-            BIN_DIR / "aux/errorgen",
+            BUILD_DIR / "extra/errorgen",
+            BIN_DIR / "extra/errorgen",
             "errorgen",
             "errorgen",
         )
 
-        for repo in self.JAVA_SRCS:
+        for repo in JAVA_SRCS:
             if has_unstaged_changes(c, repo.src):
                 logging.info(
                     f"{repo.name} sources have already had parser-errors introduced. Skipping..."
                 )
                 continue
             with c.cd(repo.src):
-                c.run(str(BIN_DIR / "aux" / "errorgen" / "errorgen") + " " + repo.name)
+                c.run(
+                    str(BIN_DIR / "extra" / "errorgen" / "errorgen") + " " + repo.name
+                )
 
         patch_repo(c, self.GRMTOOLS.src, PATCH_DIR / "grmtools.diff")
 
@@ -650,18 +1011,18 @@ class RegexRedux(BenchmarkSuite):
     )
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        self.REGEX.fetch()
+        self.REGEX.fetch(c)
 
         cargo_build(
             c,
             self.FASTA,
-            BUILD_DIR / "aux/fasta",
-            BIN_DIR / "aux/fasta",
+            BUILD_DIR / "extra/fasta",
+            BIN_DIR / "extra/fasta",
             "fasta",
             "fasta",
         )
 
-        redux_input = BIN_DIR / "aux" / "fasta" / "redux_input.txt"
+        redux_input = BIN_DIR / "extra" / "fasta" / "redux_input.txt"
         if not redux_input.exists():
             with c.cd(str(redux_input.parent)):
                 c.run(f"{str(redux_input.parent / 'fasta')} 2500000 > redux_input.txt")
@@ -680,10 +1041,18 @@ class RegexRedux(BenchmarkSuite):
 
         target_path = install_dir / "redux_input.txt"
         if not target_path.exists():
-            os.symlink(redux_input.absolute(), target_path)
-            logging.info(f"Symlinked {redux_input} -> {target_path}")
+            shutil.copy2(redux_input.absolute(), target_path)
+            logging.info(f"Copied {redux_input} -> {target_path}")
         else:
-            logging.warning(f"Symlink {target_path} already exists. Skipping...")
+            logging.warning(f"{target_path} already exists. Skipping...")
+
+
+def install_linux(c):
+    LINUX.fetch(c)
+    if not (LINUX.src / ".config").exists():
+        with c.cd(str(LINUX.src)):
+            c.run("make defconfig")
+            c.run("make -j100")
 
 
 class RipGrep(BenchmarkSuite):
@@ -695,16 +1064,11 @@ class RipGrep(BenchmarkSuite):
 
     @property
     def cmd_args(self):
-        return f"-j1 $(cat {str(Path('aux/ripgrep_args').resolve())}/%(benchmark)s) {str(LINUX.src)}"
+        return f"-j1 $(cat {str(Path('extra/ripgrep_args').resolve())}/%(benchmark)s) {str(LINUX.src)}"
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        LINUX.fetch()
-        self.RIPGREP.fetch()
-
-        if not (LINUX.src / ".config").exists():
-            with c.cd(str(LINUX.src)):
-                c.run(f"make defconfig")
-                c.run(f"make -j100")
+        self.RIPGREP.fetch(c)
+        install_linux(c)
 
         patch_repo(c, self.RIPGREP.src, PATCH_DIR / f"ripgrep.{profile}.diff")
 
@@ -719,39 +1083,40 @@ class RipGrep(BenchmarkSuite):
         )
 
 
-class SomrsAST(BenchmarkSuite):
+SOMRS = Repo(
+    name="som-rs",
+    url="https://github.com/Hirevo/som-rs",
+    version="35b780cbee765cca24201fe063d3f1055ec7f608",
+    recursive=True,
+)
 
-    SOMRS = Repo(
-        name="som-rs",
-        url="https://github.com/Hirevo/som-rs",
-        version="35b780cbee765cca24201fe063d3f1055ec7f608",
-        recursive=True,
-    )
+
+class SomrsAST(BenchmarkSuite):
 
     BINARY_NAME = "som-interpreter-ast"
 
     @property
     def cmd_args(self):
         return (
-            f"-c {self.SOMRS.src}/core-lib/Smalltalk "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/Richards "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/DeltaBlue "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/NBody "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/Json "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/GraphSearch "
-            f"{self.SOMRS.src}/core-lib/Examples/Benchmarks/LanguageFeatures "
+            f"-c {SOMRS.src}/core-lib/Smalltalk "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/Richards "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/DeltaBlue "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/NBody "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/Json "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/GraphSearch "
+            f"{SOMRS.src}/core-lib/Examples/Benchmarks/LanguageFeatures "
             f"-- BenchmarkHarness %(benchmark)s %(iterations)s"
         )
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        self.SOMRS.fetch()
+        SOMRS.fetch(c)
 
-        patch_repo(c, self.SOMRS.src, PATCH_DIR / f"som-rs.{profile}.diff")
+        patch_repo(c, SOMRS.src, PATCH_DIR / f"som-rs.{profile}.diff")
 
         cargo_build(
             c,
-            self.SOMRS.src,
+            SOMRS.src,
             target_dir,
             install_dir,
             self.BINARY_NAME,
@@ -762,41 +1127,6 @@ class SomrsAST(BenchmarkSuite):
 
 class SomrsBC(SomrsAST):
     BINARY_NAME = "som-interpreter-bc"
-
-
-class YkSOM(BenchmarkSuite):
-    YKSOM = Repo(
-        name="yksom",
-        url="https://github.com/softdevteam/yksom",
-        version="master",
-        recursive=True,
-    )
-
-    @property
-    def cmd_args(self):
-        return (
-            f"--cp {self.YKSOM.src}/SOM/Smalltalk:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/Richards:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/DeltaBlue:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/NBody:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/Json:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/GraphSearch:"
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/LanguageFeatures "
-            f"{self.YKSOM.src}/SOM/Examples/Benchmarks/BenchmarkHarness.som "
-            f"%(benchmark)s %(iterations)s"
-        )
-
-    def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        self.YKSOM.fetch()
-        cargo_build(
-            c,
-            self.YKSOM.src,
-            target_dir,
-            install_dir,
-            "yksom",
-            bench_cfg_bin,
-            env,
-        )
 
 
 class FdFind(BenchmarkSuite):
@@ -816,9 +1146,9 @@ class FdFind(BenchmarkSuite):
         return "-j1"
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        self.FD.fetch()
-        LINUX.fetch()
-        self.REGEX.fetch()
+        LINUX.fetch(c)
+        self.FD.fetch(c)
+        self.REGEX.fetch(c)
 
         patch_repo(c, self.FD.src, PATCH_DIR / f"fd.{profile}.diff")
         patch_repo(c, self.REGEX.src, PATCH_DIR / f"regex.{profile}.diff")
@@ -856,8 +1186,8 @@ class Alacritty(BenchmarkSuite):
         )
 
     def build(self, c, target_dir, install_dir, bench_cfg_bin, profile, env):
-        self.VTE_BENCH.fetch()
-        self.ALACRITTY.fetch()
+        self.VTE_BENCH.fetch(c)
+        self.ALACRITTY.fetch(c)
 
         patch_repo(c, self.ALACRITTY.src, PATCH_DIR / f"alacritty.{profile}.diff")
 
@@ -870,6 +1200,36 @@ class Alacritty(BenchmarkSuite):
             bench_cfg_bin,
             env,
         )
+
+
+SOM_BENCHMARKS = (
+    Benchmark("Richards", extra_args=1),
+    Benchmark("DeltaBlue", extra_args=400),
+    Benchmark("NBody", extra_args=1000),
+    Benchmark("JsonSmall", extra_args=7),
+    Benchmark("GraphSearch", extra_args=7),
+    Benchmark("PageRank", extra_args=50),
+    Benchmark("Fannkuch", extra_args=7),
+    Benchmark("Fibonacci", extra_args="10"),
+    Benchmark("Dispatch", extra_args=10),
+    Benchmark("Bounce", extra_args="10"),
+    Benchmark("Loop", extra_args=10),
+    Benchmark("Permute", extra_args="10"),
+    Benchmark("Queens", extra_args="10"),
+    Benchmark("List", extra_args="5"),
+    Benchmark("Recurse", extra_args="10"),
+    Benchmark("Storage", extra_args=10),
+    Benchmark("Sieve", extra_args=10),
+    Benchmark("BubbleSort", extra_args="10"),
+    Benchmark("QuickSort", extra_args=20),
+    Benchmark("Sum", extra_args=10),
+    Benchmark("Towers", extra_args="3"),
+    Benchmark("TreeSort", extra_args="3"),
+    Benchmark("IntegerLoop", extra_args=5),
+    Benchmark("FieldLoop", extra_args=5),
+    Benchmark("WhileLoop", extra_args=20),
+    Benchmark("Mandelbrot", extra_args=50),
+)
 
 
 @dataclass(frozen=True)
@@ -934,14 +1294,15 @@ class Experiment:
 
     @property
     def results(self) -> [Path]:
-
         if self.measurement == Measurement.PERF:
-            return {self.results_dir / REBENCH_DATA}
+            return {self.results_dir.parent / Measurement.PERF.value / REBENCH_DATA}
         else:
             return set(
                 f
                 for f in self.results_dir.rglob("*")
-                if f.name != REBENCH_DATA and not f.is_dir()
+                if f.name != REBENCH_DATA
+                and not f.is_dir()
+                and (f.parent.name == "default" or self.experiment in f.parent.name)
             )
 
     @property
@@ -1003,11 +1364,14 @@ class Executor:
         return str(self.name)
 
     @property
+    def libgc(self) -> Path:
+        return self.alloy.install_prefix / "lib" / "libgc.so"
+
+    @property
     def run_env(self):
-        libgc = Path("/home/jake/research/bdwgc/out/libgc.so")
         env = {
             "DISPLAY": ":99",
-            "LD_PRELOAD": str(libgc),
+            "LD_PRELOAD": str(self.libgc),
         }
         env["RESULTS_DIR"] = str(self.results_dir)
         env["HT_PATH"] = str(HEAPTRACK.path)
@@ -1066,8 +1430,9 @@ class Executor:
     @property
     def env(self):
         return {
-            "RUSTC": self.alloy.path,
-            "LD_PRELOAD": str(self.alloy.install_prefix / "lib" / "libgc.so"),
+            "RUSTC": str(self.alloy.path),
+            "RUSTFLAGS": f"-L {(self.libgc.parent)}",
+            "LD_LIBRARY_PATH": str(self.libgc.parent),
         }
 
     def build(self, c=None):
@@ -1197,12 +1562,12 @@ class Experiments:
         profiles = [GCVS, PremOpt, Elision, HeapSize]
         return cls(pexecs, [e for p in profiles for e in p.experiments(pexecs)])
 
-    @property
-    def results(self):
+    def results(self, measurement=None):
         results = set()
         for e in self.experiments:
-            results.update(e.results)
-        return results
+            if e.measurement == measurement:
+                results.update(e.results)
+        return sorted(results)
 
 
 @dataclass
@@ -1232,3 +1597,28 @@ class RebenchConfig:
         )
 
         file_path.write_text(header + yaml_content)
+
+
+ALLOY = Artefact(
+    repo=Repo(
+        name="alloy",
+        url="https://github.com/softdevteam/alloy",
+        version="master",
+    ),
+)
+
+HEAPTRACK = Heaptrack(
+    repo=Repo(
+        name="heaptrack",
+        url="https://github.com/kde/heaptrack",
+        version="master",
+    ),
+)
+
+LINUX = Repo(
+    name="linux",
+    url="https://github.com/BurntSushi/linux",
+    version="master",
+    shallow_clone=True,
+    post_checkout=(("make", "defconfig"), ("make", "-j100")),
+)

@@ -23,54 +23,53 @@ ENV EXPERIMENTS=$EXPERIMENTS
 ENV SUITES=$SUITES
 ENV MEASUREMENTS=$MEASUREMENTS
 
+COPY packages-debian.txt .
+
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && \
-    apt-get -y install make bc perl build-essential curl git cmake python3.11 python3.11-venv python3.11-distutils python3-pip \
-    libtinfo-dev libzip-dev ninja-build gdb pipx rsync \
-    libdwarf-dev libunwind-dev libboost-dev libfontconfig1-dev fontconfig libboost-iostreams-dev \
-    libboost-all-dev libboost-program-options-dev libboost-regex-dev zlib1g-dev zstd libelf-dev elfutils \
-    libdw-dev pkg-config libssl-dev zlib1g-dev libzstd-dev liblzma-dev \
-    libffi-dev libedit-dev llvm-dev clang procps autotools-dev xz-utils \
-    gperf bison flex xvfb time
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+     && apt-get update -y \
+     && apt-get install -y --no-install-recommends \
+          autotools-dev bison bc perl build-essential clang cmake curl elfutils \
+          flex gdb git gperf fontconfig libfontconfig1-dev libboost-all-dev \
+          libdwarf-dev libdw-dev libedit-dev libffi-dev liblzma-dev libssl-dev \
+          libtinfo-dev libunwind-dev libzip-dev libzstd-dev \
+          libx11-6 libx11-xcb1 libxkbcommon-x11-dev libxext6 libxrandr2 libxcb1 \
+          libxrender1 libxcursor1 libgl1 libgl1-mesa-dri libglx-mesa0 x11-apps \
+          llvm-dev make ninja-build pkg-config pipx procps python3 rsync time \
+          xvfb xauth which zlib1g-dev zstd \
+     && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # Set Python 3.11 as default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
-# Set environment variables for Rust and Cargo
 ENV CARGO_HOME=/cargo
 ENV RUSTUP_HOME=/rustup
 ENV PATH=$CARGO_HOME/bin:$PATH
 
-# Install rustup and Rust nightly toolchain
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
 
-# Show versions for debugging
 RUN rustc --version && cargo --version
 
-COPY pyproject.toml ./
+COPY pyproject.toml .
+COPY Makefile .
+RUN make venv
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip --break-system-packages && \
-    pip install .[dev] --break-system-packages
 
-COPY . .
+COPY src src
+COPY *.py .
 
-RUN mkdir -p /app/artefacts
-
-RUN --mount=type=cache,target=/cache \
-    if [ "$FULL" = "false" ]; then \
-    ./fetch_binaries.sh --out-dir /cache && \
-    cp -r /cache/bin /app/artefacts/ && \
-    ls -ls /app/artefacts/bin; \
-    fi
-
-RUN  invoke build-benchmarks $EXPERIMENTS $SUITES $MEASUREMENTS
-
-FROM scratch as log_export
-COPY --from=build /app/experiment.log /docker-run-full.log
+RUN if [ "$FULL" = "false" ]; then \
+    make download-bins; \
+else \
+    RUN make build-heaptrack; \
+    RUN make build-alloy; \
+    RUN make build-benchmarks; \
+fi
+#
+COPY extra extra
 
 FROM build as runtime
 
@@ -88,9 +87,8 @@ ENV MEASUREMENTS=$MEASUREMENTS
 
 WORKDIR /app
 
-RUN pip install --upgrade pip --break-system-packages && \
-    pip install .[dev] --break-system-packages
 
-RUN ls -la
-run invoke run-benchmarks $PEXECS $EXPERIMENTS $SUITES $MEASUREMENTS
+RUN make run-benchmarks
+CMD make process
+
 

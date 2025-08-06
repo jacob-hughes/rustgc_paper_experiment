@@ -3,7 +3,7 @@
 results/
 plots/
 artefacts/
-src/
+src/*
 !src/parserbench
 !src/binary_trees
 !src/regex_redux
