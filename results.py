@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 import zstandard as zstd
 from scipy.interpolate import interp1d
+import warnings
+from scipy.sparse import SparseEfficiencyWarning
+
+warnings.filterwarnings("ignore", module=r"^(scipy|numpy)\..*")
 
 from build import (
     GCVS,
