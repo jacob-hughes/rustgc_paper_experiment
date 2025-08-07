@@ -94,8 +94,8 @@ def run_benchmarks(c, pexecs, experiments=None, suites=None, measurements=None):
         int(pexecs), exps=experiments, suites=suites, measurements=measurements
     )
 
-    print("Running")
     exps.run(c, pexecs)
+    process_results(c, experiments, suites, measurements)
 
 
 @task
