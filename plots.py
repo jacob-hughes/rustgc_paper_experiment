@@ -157,7 +157,6 @@ class SimplePlotter:
                     and not pd.isna(row[ci_lower_col])
                     and not pd.isna(row[ci_upper_col])
                 ):
-
                     err_low = max(0, row[value_col] - row[ci_lower_col])
                     err_high = max(0, row[ci_upper_col] - row[value_col])
 
@@ -224,7 +223,6 @@ class SimplePlotter:
                 and not pd.isna(row[ci_lower_col])
                 and not pd.isna(row[ci_upper_col])
             ):
-
                 r_min, r_max = row[ci_lower_col], row[ci_upper_col]
                 ranges.append((r_min, r_max))
                 color_idx = i % len(exp_config.colors)
@@ -450,6 +448,8 @@ def tabulate_benchmarks(
     header=None,
     output_file=None,
 ):
+    if df.empty:
+        return
     df = df.copy()
     df["err"] = df["ci_upper"] - df["value"]
     df[["val_fmt", "err_fmt"]] = df.apply(
@@ -518,7 +518,6 @@ def tabulate_benchmarks(
 
 
 def plot_ripgrep_subset(df, outfile=None):
-
     colour_map = {
         GCVS.GC: ["#3A87D9", "#1A5C85", 0.8, "-"],
         GCVS.ARC: ["#FF8F2E", "#D66000", 0.8, "-"],
@@ -671,7 +670,6 @@ def plot_binary_trees_mem(df):
 
 
 def plot_ripgrep_full(df, outfile=None):
-
     colour_map = {
         GCVS.GC: ["#3A87D9", "#1A5C85", 0.8, "-"],
         GCVS.ARC: ["#FF8F2E", "#D66000", 0.8, "-"],

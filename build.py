@@ -494,7 +494,7 @@ class PremOpt(ExperimentProfile):
     @classmethod
     @property
     def measurements(cls):
-        return [Measurement.PERF, Measurement.METRICS, Measurement.HEAPTRACK]
+        return [Measurement.PERF, Measurement.METRICS]
 
     @classmethod
     def _missing_(cls, value):
@@ -520,7 +520,7 @@ class Elision(ExperimentProfile):
     @classmethod
     @property
     def measurements(cls):
-        return [Measurement.PERF, Measurement.METRICS, Measurement.HEAPTRACK]
+        return [Measurement.PERF, Measurement.METRICS]
 
     @classmethod
     def _missing_(cls, value):
@@ -897,7 +897,6 @@ ERRORGEN = Path(SRC_DIR / "errorgen")
 
 
 class Grmtools(BenchmarkSuite):
-
     GRMTOOLS = Repo(
         name="grmtools",
         url="https://github.com/softdevteam/grmtools",
@@ -928,7 +927,7 @@ class Grmtools(BenchmarkSuite):
 
         cargo_build(
             c,
-            self.ERRORGEN,
+            ERRORGEN,
             BUILD_DIR / "extra/errorgen",
             BIN_DIR / "extra/errorgen",
             "errorgen",
@@ -1092,7 +1091,6 @@ SOMRS = Repo(
 
 
 class SomrsAST(BenchmarkSuite):
-
     BINARY_NAME = "som-interpreter-ast"
 
     @property

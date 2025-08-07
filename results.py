@@ -54,6 +54,8 @@ class Results:
 
     @classmethod
     def concat(cls, l):
+        if not l:
+            return cls(pd.DataFrame())
         df = pd.concat([r.df for r in l], ignore_index=True)
         return cls(df)
 
@@ -82,6 +84,8 @@ class Results:
         return df
 
     def aggregate(self, experiment, baseline=None):
+        if self.df.empty:
+            return Means(self.df, experiment.__name__.lower())
         df = self._prepare_data(experiment, baseline=None)
 
         results = []
@@ -183,11 +187,12 @@ class Means(Results):
         self.experiment = experiment
 
     def plot(self, metric, label=None, xlim=None, show_legend=False):
+        if self.df.empty:
+            return
         Path("plots").mkdir(parents=True, exist_ok=True)
         df = self.df
         df = df[df["metric"] == metric]
         df = df[~df["configuration"].isin(EXCLUDE)]
-        print(df["configuration"].unique())
         output_file = f"plots/{self.experiment}_{metric.pathname}.svg"
 
         cfg = SimplePlotConfig(
@@ -204,6 +209,8 @@ class Means(Results):
 
     def tabulate(self, metric, agg_type, format_func=None, split=None):
         df = self.df
+        if df.empty:
+            return
         df = df[df["metric"] == metric]
         df = df[df["agg_type"] == agg_type]
         if agg_type == Aggregation.INDIVIDUAL:
@@ -331,9 +338,9 @@ class Heaptrack(Results):
         timestamps, heap_sizes, num_allocs_list = [], [], []
         alloc_infos = []
         alloc_counts, alloc_total_size = {}, {}
-        current_allocs = current_heap = total_allocs = total_frees = timestamp = (
-            event_count
-        ) = 0
+        current_allocs = (
+            current_heap
+        ) = total_allocs = total_frees = timestamp = event_count = 0
 
         SKIP_OPS = {"v", "X", "I", "s", "t", "i", "R"}
 
@@ -393,9 +400,9 @@ class Heaptrack(Results):
                             elif op == "c" and len(args) >= 1:
                                 timestamp = int(args[0], 16)
                             elif op == "A":
-                                current_allocs = current_heap = total_allocs = (
-                                    total_frees
-                                ) = event_count = 0
+                                current_allocs = (
+                                    current_heap
+                                ) = total_allocs = total_frees = event_count = 0
                                 alloc_counts.clear()
                                 alloc_total_size.clear()
                                 continue
@@ -515,6 +522,8 @@ class Heaptrack(Results):
 
     @classmethod
     def concat(cls, l):
+        if not l:
+            return cls(pd.DataFrame())
         df = pd.concat([h.df for h in l], ignore_index=True)
         time_series = pd.concat([h.time_series for h in l], ignore_index=True)
         return cls(df, time_series)
