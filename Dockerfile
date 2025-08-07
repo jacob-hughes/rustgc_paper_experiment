@@ -28,17 +28,17 @@ COPY packages-debian.txt .
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
-     && apt-get update -y \
-     && apt-get install -y --no-install-recommends \
-          autotools-dev bison bc perl build-essential clang cmake curl elfutils \
-          flex gdb git gperf fontconfig libfontconfig1-dev libboost-all-dev \
-          libdwarf-dev libdw-dev libedit-dev libffi-dev liblzma-dev libssl-dev \
-          libtinfo-dev libunwind-dev libzip-dev libzstd-dev \
-          libx11-6 libx11-xcb1 libxkbcommon-x11-dev libxext6 libxrandr2 libxcb1 \
-          libxrender1 libxcursor1 libgl1 libgl1-mesa-dri libglx-mesa0 x11-apps \
-          llvm-dev make ninja-build pkg-config pipx procps python3 rsync time \
-          xvfb xauth which zlib1g-dev zstd \
-     && rm -rf /var/lib/apt/lists/*
+    && apt-get update -y \
+    && apt-get install -y --no-install-recommends \
+    autotools-dev bison bc perl build-essential clang cmake curl elfutils \
+    flex gdb git gperf fontconfig libfontconfig1-dev libboost-all-dev \
+    libdwarf-dev libdw-dev libedit-dev libffi-dev liblzma-dev libssl-dev \
+    libtinfo-dev libunwind-dev libzip-dev libzstd-dev \
+    libx11-6 libx11-xcb1 libxkbcommon-x11-dev libxext6 libxrandr2 libxcb1 \
+    libxrender1 libxcursor1 libgl1 libgl1-mesa-dri libglx-mesa0 x11-apps \
+    llvm-dev make ninja-build pkg-config pipx procps python3 rsync time \
+    xvfb xauth which zlib1g-dev zstd \
+    && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # Set Python 3.11 as default
@@ -63,11 +63,11 @@ COPY *.py .
 
 RUN if [ "$FULL" = "false" ]; then \
     make download-bins; \
-else \
+    else \
     RUN make build-heaptrack; \
     RUN make build-alloy; \
     RUN make build-benchmarks; \
-fi
+    fi
 #
 COPY extra extra
 
@@ -88,7 +88,6 @@ ENV MEASUREMENTS=$MEASUREMENTS
 WORKDIR /app
 
 
-RUN make run-benchmarks
-CMD make process
+CMD make run-benchmarks
 
 

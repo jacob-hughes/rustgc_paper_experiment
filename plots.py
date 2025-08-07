@@ -531,6 +531,8 @@ def plot_ripgrep_subset(df, outfile=None):
     handles, labels = [], []
     benchmarks = ["linux_word", "linux_unicode_greek", "linux_alternates"]
     df = df[df["benchmark"].isin(benchmarks)]
+    if df.empty:
+        return
     df["benchmark"] = df["benchmark"].astype("category")
     df["benchmark"] = df["benchmark"].cat.reorder_categories(benchmarks)
     for benchmark, results in df.groupby("benchmark"):
@@ -608,6 +610,8 @@ def plot_binary_trees_mem(df):
     }
 
     df = df[df["suite"] == "binary_trees"]
+    if df.empty:
+        return
     fig, axes = plt.subplots(1, 1, figsize=(4.5, 4.5))
 
     axes = [axes]
